@@ -1,12 +1,12 @@
 import type { Metadata } from 'next'
-import { ExploreApp } from '@/components/reelforge/explore-app'
+import { ExploreScreen } from '@/components/somnia/screens'
 
 export const metadata: Metadata = {
-  title: 'Explore — Reelforge Community Gallery',
+  title: 'Explore — Somnia Ideas Feed',
   description:
-    'Clips and stills forged inside Reelforge. Hover to play, remix to load the exact recipe into the composer and make it yours.',
+    'Shared dreams from the Somnia community — hover to play, like what moves you, remix anything into your own recipe.',
 }
 
 export default function ExplorePage() {
-  return <ExploreApp />
+  return <ExploreScreen />
 }

@@ -1,12 +1,12 @@
 import type { Metadata } from 'next'
-import { HistoryApp } from '@/components/reelforge/history-app'
+import { HistoryScreen } from '@/components/somnia/screens'
 
 export const metadata: Metadata = {
-  title: 'History — My Forges',
+  title: 'History — My Dreams',
   description:
-    'Everything this Reelforge studio has forged — clips, stills and edits with their recipes. Remix any entry to reload its settings in the composer.',
+    'Everything you have dreamed in Somnia — clips, stills and edits with their recipes. Extend, modify, reframe, upscale, share unlisted or remix.',
 }
 
 export default function HistoryPage() {
-  return <HistoryApp />
+  return <HistoryScreen />
 }

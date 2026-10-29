@@ -13,6 +13,7 @@ Allow: /
 User-agent: *
 Allow: /
 
-# Phase 5: share pages are unlisted capability links — keep them out of crawlers.
+# Unlisted capability links — keep share pages and shared boards out of crawlers.
 User-agent: *
 Disallow: /share/
+Disallow: /boards/

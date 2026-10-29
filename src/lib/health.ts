@@ -2,7 +2,27 @@ import { spawn } from 'node:child_process'
 import { resolveFfmpegBin } from '@/lib/runtime'
 
 import { db } from '@/lib/db'
-import type { ProviderHealthDto } from '@/lib/types'
+
+/** Provider/system health snapshot DTO (client-safe value type). */
+export interface ProviderHealthDto {
+  /** Active engine name — 'demo', 'fal' or 'selfhosted'. */
+  activeProvider: string
+  /** FAL_KEY present? Boolean only — the value itself is never exposed. */
+  falConfigured: boolean
+  /** SELFHOSTED_URL present? Boolean only — the value itself is never exposed. */
+  selfHostedConfigured: boolean
+  /** Display string for the configured self-hosted model id (or null). */
+  selfHostedModel: string | null
+  ffmpegAvailable: boolean
+  /** Parsed from `ffmpeg -version` (first line); null when unavailable. */
+  ffmpegVersion: string | null
+  lastJobAt: string | null
+  /** Job activity in the trailing 5-minute window (by Job.createdAt). */
+  last5m: { submitted: number; completed: number; failed: number }
+  /** Multi-user Somnia: registered accounts (balances are per-user). */
+  registeredUsers: number
+  checkedAt: string
+}
 
 /**
  * Phase 4 — read-only provider/system health snapshot.

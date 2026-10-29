@@ -1,28 +1,28 @@
 # Somnia — repo handoff instructions
 
-> **Current state (T5, render pipeline shipped):** the multi-user domain core
-> (accounts/sessions, credit ledger, generation engine, social, API keys,
-> agents — 104 specs) is wired to a complete HTTP surface
-> (`src/lib/somnia-api.ts`, 43 specs): session-cookie + `sk_somnia_…` Bearer
-> auth, per-user credits with monthly pool refills, `POST /generate` /
-> `POST /image` (keyframes up to 16, loop/HDR, 5s/10s, 540p–1080p),
-> extend/modify/reframe/upscale (idempotent), boards, likes, the public
-> ideas feed, unlisted share links, agent runs, brainstorm and the plan
-> catalogue. **The render pipeline (`src/lib/pipeline.ts`, 8 specs) now
-> drives queued jobs to real ffmpeg MP4s** — pinned keyframe timelines or
-> generated storyboard beats (SDK imagery, original Somnia placeholder
-> fallback), Ken Burns compositing at 540p/720p/1080p across all seven
-> aspect ratios, prism poster stills for image jobs, refund-on-failure,
-> idempotent re-processing. The API kicks it after every accepted job
-> (`afterResponse` / `waitUntil`; gated off under `SOMNIA_TEST`).
-> The Reelforge-era single-user API libs and provider adapters were deleted;
-> `video.ts` was re-based onto Somnia resolutions. Brand + auth UI shipped
-> (`/signin`, `src/lib/brand.ts`, `use-session`).
-> **Next (T4b):** rewire the remaining Reelforge-shell UI onto the new API
-> (cockpit composer, explore/ideas, history, boards, API keys, plans) —
-> the old pages still call dead endpoint shapes. After that: hosted
-> provider adapters (FAL_KEY / SELFHOSTED_URL) slotting behind the
-> pipeline's FrameSource.
+> **Current state (T4b, the UI is on the Somnia API):** the multi-user domain
+> core (accounts/sessions, credit ledger, generation engine, social, API keys,
+> agents — 104 specs), the complete HTTP surface (`src/lib/somnia-api.ts`,
+> 43 specs) and the ffmpeg render pipeline (`src/lib/pipeline.ts`, 8 specs)
+> are now surfaced by a full Somnia-branded UI. Six authenticated surfaces —
+> the cockpit composer (`/`, video + prism image modes, brainstorm variants,
+> 16-keyframe pins, live plans.ts cost preview, job polling to the finished
+> clip), explore/ideas (`/explore`, likes, pagination), history
+> (`/history`, extend/modify/reframe/upscale, unlisted share, remix prefill
+> hand-off via sessionStorage), boards (`/boards`), API keys (`/keys`) and
+> plans (`/plans`) — plus the session-aware AppShell, the rewired public
+> `/share/<token>` page and a new public `/boards/<token>` board viewer.
+> 36 jsdom contract specs pin the exact fetch contracts
+> (tests/{create,explore,history,account}-ui.test.tsx); the whole suite is
+> 195 specs green, `tsc --noEmit` clean. The Reelforge-era shell
+> (components, /studio, /models, /showcase pages, legacy lib modules,
+> marketing media) was deleted. Browser-verified end to end: signup →
+> compose → charged render to a real seekable MP4 → history → share →
+> public page → like → board create → key mint → Bearer API call → remix
+> prefill.
+> **Next (T6):** hosted provider adapters (FAL_KEY / SELFHOSTED_URL) slotting
+> behind the pipeline's FrameSource; agent-run UI on top of
+> POST /api/agents; a public marketing landing for signed-out visitors.
 
 ---
 
