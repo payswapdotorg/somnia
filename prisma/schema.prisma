@@ -1,0 +1,92 @@
+// Reelforge — clean-room AI video generation studio (Phase 3)
+// Prisma schema: credits ledger + generation job pipeline + edit layer.
+// Note: CreditTransaction is APPEND-ONLY by convention — never update or delete rows.
+// Phase 5: Job.shareToken powers public unlisted share pages (/share/<token>).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default("demo")
+  credits   Int      @default(500)
+  createdAt DateTime @default(now())
+
+  jobs         Job[]
+  transactions CreditTransaction[]
+}
+
+model Job {
+  id              String   @id @default(cuid())
+  userId          String
+  prompt          String
+  /** Phase 8: creation surface — 'video' (default, legacy rows) or 'image' (single still). */
+  kind            String   @default("video")
+  tier            String // 'draft' | 'quality'
+  durationSec     Int      @default(5) // 0 for image jobs (no clip length)
+  aspectRatio     String // '16:9' | '9:16' | '1:1'
+  startFramePath  String?
+  endFramePath    String? // Phase 2: optional pinned end frame
+  board           String? // Phase 2: optional organizer label
+  parentJobId     String? // Phase 3: edit-thread lineage (plain column — resolved by query, no FK)
+  editInstruction String? // Phase 3: raw instruction of the edit that created this child job
+  shareToken      String?  @unique // Phase 5: public unlisted /share/<token> link (null = not shared)
+  sharedAt        DateTime? // Phase 5: when the share link was (re)enabled
+  status          String // 'queued' | 'dispatched' | 'running' | 'moderated' | 'completed' | 'failed'
+  progress        Int      @default(0)
+  errorMessage    String?
+  creditsCharged  Int      @default(0)
+  providerCostUsd Float    @default(0)
+  idempotencyKey  String   @unique
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user         User              @relation(fields: [userId], references: [id])
+  generations  Generation[]
+  assets       Asset[]
+  transactions CreditTransaction[]
+}
+
+model Generation {
+  id         String   @id @default(cuid())
+  jobId      String
+  provider   String // 'demo' | 'fal'
+  status     String // 'queued' | 'dispatched' | 'running' | 'succeeded' | 'failed'
+  framesJson String   @default("[]")
+  videoPath  String? // Phase 2: public-relative path of the rendered MP4 (when produced)
+  createdAt  DateTime @default(now())
+
+  job Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
+}
+
+// APPEND-ONLY ledger: every credit grant, charge and refund is recorded here.
+model CreditTransaction {
+  id           String   @id @default(cuid())
+  userId       String
+  jobId        String?
+  amount       Int // signed: negative = charge, positive = grant/refund
+  kind         String // 'grant' | 'generation' | 'refund'
+  balanceAfter Int
+  createdAt    DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+  job  Job? @relation(fields: [jobId], references: [id])
+}
+
+// Phase 3 transform kinds are 'reframe' (re-crop) and 'camera' (virtual camera move).
+model Asset {
+  id         String   @id @default(cuid())
+  jobId      String
+  kind       String // 'frame' | 'startFrame' | 'endFrame' | 'video' | 'reframe' | 'camera'
+  path       String
+  label      String? // Phase 3: human label for transform variants (e.g. "9:16 crop", "Push in")
+  variantKey String? // Phase 3: idempotency key per (job, variant) — e.g. "reframe-9x16", "camera-push-in"
+  createdAt  DateTime @default(now())
+
+  job Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
+}

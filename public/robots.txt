@@ -1,0 +1,18 @@
+User-agent: Googlebot
+Allow: /
+
+User-agent: Bingbot
+Allow: /
+
+User-agent: Twitterbot
+Allow: /
+
+User-agent: facebookexternalhit
+Allow: /
+
+User-agent: *
+Allow: /
+
+# Phase 5: share pages are unlisted capability links — keep them out of crawlers.
+User-agent: *
+Disallow: /share/
