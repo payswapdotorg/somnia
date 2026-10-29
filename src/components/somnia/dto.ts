@@ -168,3 +168,47 @@ export interface AgentRunView {
   createdAt: string
   completedAt: string | null
 }
+
+/** Insights snapshot returned by GET /api/insights — the margin lens (T7/T8). */
+export interface InsightsTotalsView {
+  total: number
+  queued: number
+  running: number
+  moderated: number
+  completed: number
+  failed: number
+}
+
+export interface InsightsLedgerView {
+  granted: number
+  spent: number
+  refunded: number
+  balance: number
+}
+
+export interface InsightsEconomicsView {
+  revenueUsd: number
+  providerCostUsd: number
+  grossMarginPct: number
+}
+
+export interface InsightsTierView {
+  provider: string
+  model: string
+  resolution: string
+  jobs: number
+  credits: number
+  costUsd: number
+  revenueUsd: number
+  marginPct: number
+  avgCostUsdPerJob: number
+}
+
+export interface InsightsView {
+  plan: string
+  jobs: InsightsTotalsView
+  ledger: InsightsLedgerView
+  economics: InsightsEconomicsView
+  tiers: InsightsTierView[]
+  generatedAt: string
+}

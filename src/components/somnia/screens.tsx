@@ -18,6 +18,7 @@ import { BoardsApp } from '@/components/somnia/boards-app'
 import { KeysApp } from '@/components/somnia/keys-app'
 import { PlansApp } from '@/components/somnia/plans-app'
 import { AgentsApp } from '@/components/somnia/agents-app'
+import { InsightsApp } from '@/components/somnia/insights-app'
 import { LandingApp } from '@/components/somnia/landing'
 import type { RemixPrefill } from '@/components/somnia/dto'
 
@@ -173,6 +174,27 @@ export function PlansScreen() {
       }}
     >
       <PlansApp user={user} />
+    </AppShell>
+  )
+}
+
+export function InsightsScreen() {
+  const { user, loading, signOut } = useSession()
+  const router = useRouter()
+  return (
+    <AppShell
+      user={user}
+      loading={loading}
+      current="insights"
+      signOut={() => {
+        void signOut().then(() => router.push('/'))
+      }}
+    >
+      <PageHeading
+        title="Insights"
+        subtitle="Your usage and the margin lens — jobs, credits, revenue, provider cost, one honest snapshot."
+      />
+      <InsightsApp user={user} />
     </AppShell>
   )
 }

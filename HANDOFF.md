@@ -1,42 +1,30 @@
 # Somnia — repo handoff instructions
 
-> **Current state (T7, hosted provider economics + LLM planning):** on top of
-> the T6 tree (hosted tiers, agents UI, landing — 217 specs) three things
-> landed:
+> **Current state (T8, the Insights / usage surface):** on top of the T7
+> margin-lens backend, the lens now has its UI. What landed:
 >
-> 1. **Hosted provider economics** (`src/lib/economics.ts`, 12 specs) — the
->    per-(provider x model x resolution) USD cost table that finally writes
->    `Job.providerCostUsd` for real: the pipeline stamps it at dispatch time
->    (demo/local composites = $0; selfhosted/fal look up the table). Provider
->    cost scales ~linearly with render time (10s = 2x — NOT the 3x retail
->    ladder), HDR x1.5, prism stills flat. `SOMNIA_PROVIDER_COSTS` (JSON)
->    deep-merges over the built-ins so operators pin actual pricing without
->    code changes. The stamp deliberately survives failures: refunded
->    customers, but real GPU/API money — the lens stays honest.
-> 2. **The margin lens** (`src/lib/insights.ts` + `GET /api/insights`, 11
->    specs) — caller-scoped snapshot: job totals, ledger flow by kind,
->    revenue proxy (consumed credits x `usdPerCredit(plan)` — derived from
->    the real plan ladder, trial = $0), provider cost, gross margin (never
->    NaN), and the per-(provider x model x resolution) tier table. Two flat
->    queries + in-memory join (jobs x generations), no N+1.
-> 3. **LLM agent planning** (`src/lib/planner.ts` + agents.ts, 16 specs) —
->    `planAgentRun` is now LLM-first: server-side chat completion decomposes
->    the goal into shots; output is treated as untrusted (fences stripped,
->    outer object located defensively, prompts bounded 3..500 chars, notes
->    capped, shots renumbered, plan clamped/padded to the variation cap).
->    Any decline/throw/malformation falls back to the deterministic angle
->    builder — an LLM outage never blocks planning. `AgentRun.planner`
->    (additive schema field, default 'heuristic') records which planner ran.
->    Hermetic under SOMNIA_TEST; the live path was smoke-verified in the dev
->    sandbox (`scripts/smoke-planner.ts`).
+> 1. **`/insights` (the surface)** — `src/components/somnia/insights-app.tsx`
+>    + `InsightsScreen` + a top-nav entry. One `GET /api/insights` on mount
+>    (a usage dashboard does not poll) plus a manual Refresh; skeleton
+>    first-load; load error with Retry; a failed refresh keeps the stale
+>    lens visible under an error banner instead of wiping it.
+> 2. **Honest rendering rules, pinned by tests** — provider cost card says
+>    *failures included*; zero revenue renders `0%` with a "no revenue yet"
+>    note (never NaN); negative margins render in rose with
+>    `data-margin="negative"` instead of being hidden; demo tiers show
+>    `$0.00` cost; the tier-vs-global revenue distinction (charged vs
+>    consumed credits — they differ by exactly your refunds) is written on
+>    the page. Snapshot stamp shown as UTC; plan chip carries the caller's
+>    plan.
+> 3. **`InsightsView` DTO types** in `dto.ts` (client-safe mirror of the
+>    T7 snapshot shape).
 >
-> Also: pre-existing `react-hooks/set-state-in-effect` lint error in
-> `screens.tsx` fixed (remix hand-off read deferred to a microtask — same
-> one-shot semantics, no cascading render). The whole suite is **256 specs
-> green**, `tsc --noEmit` clean, `eslint .` zero errors.
-> **Next (T8):** an Insights/usage UI surface for the margin lens; board
-> cover stills / OG imagery for the landing; durable storage (Turso/Neon)
-> and blob media; multi-model routing across hosted + self-hosted tiers.
+> The whole suite is **262 specs green** (6 new), `tsc --noEmit` clean,
+> `eslint .` zero errors (11 pre-existing unused-disable warnings, none in
+> the new files).
+> **Next (T9):** board cover stills / OG imagery for the landing; durable
+> storage (Turso/Neon) and blob media; multi-model routing across hosted +
+> self-hosted tiers.
 
 ---
 

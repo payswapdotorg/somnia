@@ -11,7 +11,15 @@ import { BRAND } from '@/lib/brand'
 import { AvatarBlob } from '@/components/somnia/bits'
 import type { SessionUser } from '@/hooks/use-session'
 
-export type ShellSection = 'create' | 'explore' | 'history' | 'boards' | 'agents' | 'keys' | 'plans'
+export type ShellSection =
+  | 'create'
+  | 'explore'
+  | 'history'
+  | 'boards'
+  | 'agents'
+  | 'keys'
+  | 'plans'
+  | 'insights'
 
 const NAV: { key: ShellSection; href: string; label: string }[] = [
   { key: 'create', href: '/', label: 'Create' },
@@ -21,6 +29,7 @@ const NAV: { key: ShellSection; href: string; label: string }[] = [
   { key: 'agents', href: '/agents', label: 'Agents' },
   { key: 'keys', href: '/keys', label: 'API keys' },
   { key: 'plans', href: '/plans', label: 'Plans' },
+  { key: 'insights', href: '/insights', label: 'Insights' },
 ]
 
 export interface AppShellProps {
