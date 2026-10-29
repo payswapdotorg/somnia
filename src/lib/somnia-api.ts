@@ -49,6 +49,8 @@
 //   GET    providers/health        → provider health snapshot
 
 import { db } from '@/lib/db'
+import { processJob } from '@/lib/pipeline'
+import { afterResponse } from '@/lib/runtime'
 import {
   SESSION_COOKIE,
   signup,
@@ -88,6 +90,16 @@ import { serveMedia } from '@/lib/media-handler'
 import { getProviderHealth } from '@/lib/health'
 import { randomBytes } from 'node:crypto'
 import type { User } from '@prisma/client'
+
+/** Kick the render pipeline after the HTTP response (never in tests). */
+function kickPipeline(jobId: string): void {
+  if (process.env.SOMNIA_TEST) return // hermetic: tests drive processJob directly
+  afterResponse(
+    processJob(jobId).catch((error) => {
+      console.error('[pipeline] background processing failed:', (error as Error)?.message)
+    })
+  )
+}
 
 // ---------------------------------------------------------------- helpers
 
@@ -346,6 +358,7 @@ async function postGenerate(request: Request, user: User): Promise<Response> {
       idempotencyKey: str(body.idempotencyKey),
     })
     const detail = await getJob(user.id, job.id)
+    kickPipeline(job.id)
     return json({ job: detail }, 201)
   } catch (error) {
     return toErrorResponse(error)
@@ -368,6 +381,7 @@ async function postImage(request: Request, user: User): Promise<Response> {
       idempotencyKey: str(body.idempotencyKey),
     })
     const detail = await getJob(user.id, job.id)
+    kickPipeline(job.id)
     return json({ job: detail }, 201)
   } catch (error) {
     return toErrorResponse(error)

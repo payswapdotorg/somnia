@@ -5,7 +5,7 @@ import path from 'path'
 import { absoluteFromPublic, ensureGeneratedDirWritable, GENERATED_DIR } from '@/lib/frames'
 import { resolveFfmpegBin } from '@/lib/runtime'
 import type { CameraPresetId } from '@/lib/presets'
-import type { AspectRatio, Tier } from '@/lib/pricing'
+import type { AspectRatio, Resolution } from '@/lib/plans'
 
 /**
  * Reelforge video compositor (Phase 2 + Phase 3).
@@ -14,13 +14,13 @@ import type { AspectRatio, Tier } from '@/lib/pricing'
  * the system ffmpeg binary:
  *   - per-segment Ken Burns motion (slow zoom, alternating in/out) via zoompan
  *   - crossfades between segments via xfade
- *   - H.264 + yuv420p + faststart, 30 fps, CRF 26 (draft) / 23 (quality)
+ *   - H.264 + yuv420p + faststart, 30 fps, CRF 28 (540p) / 26 (720p) / 23 (1080p)
  *
  * Phase 3 additions:
  *   - `motion` presets on renderVideo: virtual camera moves (push in,
  *     pull back, drift left/right) re-render an existing frame list
  *   - `reframeVideo`: scale + centre-crop transform of an existing MP4 onto
- *     a new aspect-ratio canvas (tier-aware resolution)
+ *     a new aspect-ratio canvas (resolution-aware)
  *
  * Robustness contract: `renderVideo`/`reframeVideo` NEVER throw. On any
  * failure (ffmpeg missing, filter error, timeout) they log, clean up, and
@@ -44,22 +44,40 @@ const TOTAL_BUDGET_MS = 110_000
 /** Ceiling for a single ffmpeg invocation. */
 const SINGLE_RUN_CAP_MS = 90_000
 
-const CANVAS: Record<Tier, Record<AspectRatio, { w: number; h: number }>> = {
-  quality: {
-    '16:9': { w: 1344, h: 768 },
-    '9:16': { w: 768, h: 1344 },
-    '1:1': { w: 960, h: 960 },
+const CANVAS: Record<Resolution, Record<AspectRatio, { w: number; h: number }>> = {
+  '540p': {
+    '16:9': { w: 960, h: 540 },
+    '9:16': { w: 540, h: 960 },
+    '1:1': { w: 540, h: 540 },
+    '4:3': { w: 720, h: 540 },
+    '3:4': { w: 540, h: 720 },
+    '21:9': { w: 1260, h: 540 },
+    '9:21': { w: 540, h: 1260 },
   },
-  draft: {
-    '16:9': { w: 854, h: 480 },
-    '9:16': { w: 480, h: 854 },
-    '1:1': { w: 480, h: 480 },
+  '720p': {
+    '16:9': { w: 1280, h: 720 },
+    '9:16': { w: 720, h: 1280 },
+    '1:1': { w: 720, h: 720 },
+    '4:3': { w: 960, h: 720 },
+    '3:4': { w: 720, h: 960 },
+    '21:9': { w: 1680, h: 720 },
+    '9:21': { w: 720, h: 1680 },
+  },
+  '1080p': {
+    '16:9': { w: 1920, h: 1080 },
+    '9:16': { w: 1080, h: 1920 },
+    '1:1': { w: 1080, h: 1080 },
+    '4:3': { w: 1440, h: 1080 },
+    '3:4': { w: 1080, h: 1440 },
+    '21:9': { w: 2520, h: 1080 },
+    '9:21': { w: 1080, h: 2520 },
   },
 }
 
-const CRF_BY_TIER: Record<Tier, number> = {
-  draft: 26,
-  quality: 23,
+const CRF_BY_RESOLUTION: Record<Resolution, number> = {
+  '540p': 28,
+  '720p': 26,
+  '1080p': 23,
 }
 
 export function videoPath(jobId: string): string {
@@ -184,7 +202,7 @@ function segmentFilter(
 
 export interface RenderVideoOptions {
   jobId: string
-  tier: Tier
+  resolution: Resolution
   aspectRatio: AspectRatio
   durationSec: number
   /** Ordered stills (public-relative paths) composing the story. */
@@ -201,13 +219,13 @@ export interface RenderVideoOptions {
  * or null when video production had to be skipped (never throws).
  */
 export async function renderVideo(options: RenderVideoOptions): Promise<string | null> {
-  const { jobId, tier, aspectRatio, durationSec } = options
+  const { jobId, resolution, aspectRatio, durationSec } = options
   const motion: Motion = options.motion ?? 'kenburns'
   const outputName = options.outputName ?? jobId
   const segments = options.segments.filter((s) => typeof s === 'string' && s.length > 0)
   if (segments.length === 0) return null
 
-  const canvas = CANVAS[tier]?.[aspectRatio]
+  const canvas = CANVAS[resolution]?.[aspectRatio]
   if (!canvas) return null
 
   const startedAt = Date.now()
@@ -225,7 +243,7 @@ export async function renderVideo(options: RenderVideoOptions): Promise<string |
       Math.round(((durationSec + (count - 1) * XFADE_SEC) / count) * FPS)
     )
     const segDur = segFrames / FPS
-    const crf = CRF_BY_TIER[tier]
+    const crf = CRF_BY_RESOLUTION[resolution]
 
     // 1) One intermediate clip per segment (Ken Burns over a single still).
     const segmentFiles: string[] = []
@@ -454,8 +472,8 @@ export function cameraVariantPath(jobId: string, preset: CameraPreset): string {
 
 export interface ReframeVideoOptions {
   jobId: string
-  tier: Tier
-  /** Target canvas aspect — resolution comes from the job's tier map. */
+  resolution: Resolution
+  /** Target canvas aspect — canvas size comes from the resolution map. */
   targetAspectRatio: AspectRatio
   /** Public-relative path of the existing MP4 to re-crop. */
   sourcePath: string
@@ -463,13 +481,13 @@ export interface ReframeVideoOptions {
 
 /**
  * Phase 3 reframe: scale + centre-crop an existing MP4 onto the target
- * aspect's tier-aware canvas, re-encoded H.264 yuv420p faststart 30fps at the
- * tier CRF. Returns the public-relative MP4 path on success, or null (never
+ * aspect's resolution-aware canvas, re-encoded H.264 yuv420p faststart 30fps at
+ * the resolution CRF. Returns the public-relative MP4 path on success, or null (never
  * throws). Frame count/duration of the source are preserved exactly.
  */
 export async function reframeVideo(options: ReframeVideoOptions): Promise<string | null> {
-  const { jobId, tier, targetAspectRatio } = options
-  const canvas = CANVAS[tier]?.[targetAspectRatio]
+  const { jobId, resolution, targetAspectRatio } = options
+  const canvas = CANVAS[resolution]?.[targetAspectRatio]
   if (!canvas) return null
 
   const startedAt = Date.now()
@@ -497,7 +515,7 @@ export async function reframeVideo(options: ReframeVideoOptions): Promise<string
       '-c:v',
       'libx264',
       '-crf',
-      String(CRF_BY_TIER[tier]),
+      String(CRF_BY_RESOLUTION[resolution]),
       '-preset',
       'veryfast',
       '-pix_fmt',

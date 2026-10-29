@@ -2,9 +2,6 @@ import { spawn } from 'node:child_process'
 import { resolveFfmpegBin } from '@/lib/runtime'
 
 import { db } from '@/lib/db'
-import { resolveProvider } from '@/lib/providers'
-import { isFalConfigured } from '@/lib/providers/fal-stub'
-import { isSelfHostedConfigured, selfHostedModel } from '@/lib/providers/selfhosted'
 import type { ProviderHealthDto } from '@/lib/types'
 
 /**
@@ -95,11 +92,15 @@ export async function getProviderHealth(): Promise<ProviderHealthDto> {
     last5mStatuses.find((g) => g.status === status)?._count._all ?? 0
 
   return {
-    // resolveProvider() name — 'demo', 'fal' or 'selfhosted' (display string).
-    activeProvider: resolveProvider().name,
-    falConfigured: isFalConfigured(),
-    selfHostedConfigured: isSelfHostedConfigured(),
-    selfHostedModel: isSelfHostedConfigured() ? selfHostedModel() : null,
+    // The Somnia render pipeline (src/lib/pipeline.ts) drives jobs with the
+    // demo engine today; hosted/self-hosted adapters re-slot behind it when
+    // their env keys appear (display string only — never the values).
+    activeProvider: 'demo',
+    falConfigured: !!process.env.FAL_KEY,
+    selfHostedConfigured: !!process.env.SELFHOSTED_URL,
+    selfHostedModel: process.env.SELFHOSTED_URL
+      ? (process.env.SELFHOSTED_MODEL ?? 'wan2.2-t2v-5b')
+      : null,
     ffmpegAvailable: ffmpeg.available,
     ffmpegVersion: ffmpeg.version,
     lastJobAt: lastJob?.updatedAt.toISOString() ?? null,

@@ -1,6 +1,6 @@
 # Somnia — repo handoff instructions
 
-> **Current state (T3, API layer shipped):** the multi-user domain core
+> **Current state (T5, render pipeline shipped):** the multi-user domain core
 > (accounts/sessions, credit ledger, generation engine, social, API keys,
 > agents — 104 specs) is wired to a complete HTTP surface
 > (`src/lib/somnia-api.ts`, 43 specs): session-cookie + `sk_somnia_…` Bearer
@@ -8,12 +8,21 @@
 > `POST /image` (keyframes up to 16, loop/HDR, 5s/10s, 540p–1080p),
 > extend/modify/reframe/upscale (idempotent), boards, likes, the public
 > ideas feed, unlisted share links, agent runs, brainstorm and the plan
-> catalogue. The Reelforge-era single-user API libs were deleted.
-> **Next (T4):** the UI is still the Reelforge shell (brand + old endpoint
-> shapes) — rebrand to Somnia and rewire it onto the new API (auth screens,
-> keyframe timeline composer, likes/feed, boards, API keys page, plans).
-> A render/worker loop that drives queued jobs to `completed` with real
-> media (ffmpeg demo provider) is the tier after that.
+> catalogue. **The render pipeline (`src/lib/pipeline.ts`, 8 specs) now
+> drives queued jobs to real ffmpeg MP4s** — pinned keyframe timelines or
+> generated storyboard beats (SDK imagery, original Somnia placeholder
+> fallback), Ken Burns compositing at 540p/720p/1080p across all seven
+> aspect ratios, prism poster stills for image jobs, refund-on-failure,
+> idempotent re-processing. The API kicks it after every accepted job
+> (`afterResponse` / `waitUntil`; gated off under `SOMNIA_TEST`).
+> The Reelforge-era single-user API libs and provider adapters were deleted;
+> `video.ts` was re-based onto Somnia resolutions. Brand + auth UI shipped
+> (`/signin`, `src/lib/brand.ts`, `use-session`).
+> **Next (T4b):** rewire the remaining Reelforge-shell UI onto the new API
+> (cockpit composer, explore/ideas, history, boards, API keys, plans) —
+> the old pages still call dead endpoint shapes. After that: hosted
+> provider adapters (FAL_KEY / SELFHOSTED_URL) slotting behind the
+> pipeline's FrameSource.
 
 ---
 
