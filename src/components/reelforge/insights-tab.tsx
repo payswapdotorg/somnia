@@ -519,13 +519,9 @@ function ProviderHealthCard({ health }: { health: ProviderHealthDto }) {
             </span>
           )}
         </HealthFact>
-        <HealthFact icon={Coins} label="Credits remaining">
-          <span className={cn('tabular-nums', health.creditsRemaining < 100 && 'font-semibold text-red-500')}>
-            {intFmt.format(health.creditsRemaining)} cr
-          </span>
-          {health.creditsRemaining < 100 && (
-            <span className="block text-xs text-red-500/90">drain guard — balance running low</span>
-          )}
+        <HealthFact icon={Coins} label="Registered users">
+          <span className="tabular-nums">{intFmt.format(health.registeredUsers)}</span>
+          <span className="block text-xs text-red-500/90">multi-user Somnia — balances are per-user</span>
         </HealthFact>
       </dl>
 

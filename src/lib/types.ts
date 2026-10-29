@@ -220,7 +220,7 @@ export interface ProviderHealthDto {
   lastJobAt: string | null
   /** Job activity in the trailing 5-minute window (by Job.createdAt). */
   last5m: { submitted: number; completed: number; failed: number }
-  /** Demo-balance drain guard: credits left on the studio user row. */
-  creditsRemaining: number
+  /** Multi-user Somnia: registered accounts (balances are per-user). */
+  registeredUsers: number
   checkedAt: string
 }

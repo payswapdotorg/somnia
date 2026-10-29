@@ -6,7 +6,6 @@ import { resolveProvider } from '@/lib/providers'
 import { isFalConfigured } from '@/lib/providers/fal-stub'
 import { isSelfHostedConfigured, selfHostedModel } from '@/lib/providers/selfhosted'
 import type { ProviderHealthDto } from '@/lib/types'
-import { getOrCreateDemoUser } from '@/lib/user'
 
 /**
  * Phase 4 — read-only provider/system health snapshot.
@@ -85,8 +84,8 @@ const LAST_5M_MS = 5 * 60 * 1000
 export async function getProviderHealth(): Promise<ProviderHealthDto> {
   const windowStart = new Date(Date.now() - LAST_5M_MS)
 
-  const [user, ffmpeg, lastJob, last5mStatuses] = await Promise.all([
-    getOrCreateDemoUser(),
+  const [userCount, ffmpeg, lastJob, last5mStatuses] = await Promise.all([
+    db.user.count(),
     ffmpegProbe(),
     db.job.findFirst({ orderBy: { updatedAt: 'desc' }, select: { updatedAt: true } }),
     db.job.groupBy({ by: ['status'], _count: { _all: true }, where: { createdAt: { gte: windowStart } } }),
@@ -109,7 +108,8 @@ export async function getProviderHealth(): Promise<ProviderHealthDto> {
       completed: count5m('completed'),
       failed: count5m('failed'),
     },
-    creditsRemaining: user.credits,
+    /** Multi-user Somnia: registered accounts (balances are per-user). */
+    registeredUsers: userCount,
     checkedAt: new Date().toISOString(),
   }
 }

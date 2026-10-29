@@ -1,4 +1,24 @@
-# Reelforge — repo handoff instructions
+# Somnia — repo handoff instructions
+
+> **Current state (T3, API layer shipped):** the multi-user domain core
+> (accounts/sessions, credit ledger, generation engine, social, API keys,
+> agents — 104 specs) is wired to a complete HTTP surface
+> (`src/lib/somnia-api.ts`, 43 specs): session-cookie + `sk_somnia_…` Bearer
+> auth, per-user credits with monthly pool refills, `POST /generate` /
+> `POST /image` (keyframes up to 16, loop/HDR, 5s/10s, 540p–1080p),
+> extend/modify/reframe/upscale (idempotent), boards, likes, the public
+> ideas feed, unlisted share links, agent runs, brainstorm and the plan
+> catalogue. The Reelforge-era single-user API libs were deleted.
+> **Next (T4):** the UI is still the Reelforge shell (brand + old endpoint
+> shapes) — rebrand to Somnia and rewire it onto the new API (auth screens,
+> keyframe timeline composer, likes/feed, boards, API keys page, plans).
+> A render/worker loop that drives queued jobs to `completed` with real
+> media (ffmpeg demo provider) is the tier after that.
+
+---
+
+# Reelforge — repo handoff instructions (legacy text, pre-Somnia port)
+
 
 This folder is a clean, ready-to-push export of the Reelforge app
 (original clean-room build; see README.md inside for provenance notes):

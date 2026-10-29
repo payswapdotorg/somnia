@@ -33,7 +33,8 @@ export const IS_SERVERLESS = !!process.env.VERCEL
  * matches, so every stored /generated/... path keeps working unchanged).
  */
 export function mediaDir(): string {
-  return IS_SERVERLESS ? '/tmp/reelforge-generated' : path.join(process.cwd(), 'public', 'generated')
+  if (process.env.SOMNIA_MEDIA_DIR) return process.env.SOMNIA_MEDIA_DIR
+  return IS_SERVERLESS ? '/tmp/somnia-generated' : path.join(process.cwd(), 'public', 'generated')
 }
 
 /**

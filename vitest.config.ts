@@ -18,6 +18,6 @@ export default defineConfig({
     testTimeout: 120_000,
     hookTimeout: 120_000,
     pool: 'forks',
-    poolOptions: { forks: { singleFork: true } },
+    fileParallelism: false, // one file at a time — every file re-seeds db/test.db
   },
 })

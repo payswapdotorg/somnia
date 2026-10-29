@@ -2,7 +2,6 @@ import { createReadStream } from 'fs'
 import { promises as fs } from 'fs'
 import path from 'path'
 import { GENERATED_DIR } from '@/lib/frames'
-import { NextResponse } from 'next/server'
 
 /**
  * Runtime media streaming (Phase 6).
@@ -38,6 +37,13 @@ function contentTypeFor(name: string): string {
   return CONTENT_TYPES[path.extname(name).toLowerCase()] ?? 'application/octet-stream'
 }
 
+function jsonNotFound(): Response {
+  return new Response(JSON.stringify({ error: 'not_found', message: 'Unknown media file' }), {
+    status: 404,
+    headers: { 'content-type': 'application/json' },
+  })
+}
+
 export function serveMedia(request: Request, name: string): Promise<Response> {
   return serveMediaImpl(request, name)
 }
@@ -46,13 +52,13 @@ async function serveMediaImpl(request: Request, rawName: string): Promise<Respon
   const name = Array.isArray(rawName as unknown) ? (rawName as unknown as string[]).join('/') : rawName
 
   if (!name || !SAFE_NAME.test(name) || name.includes('..')) {
-    return NextResponse.json({ error: 'not_found', message: 'Unknown media file' }, { status: 404 })
+    return jsonNotFound()
   }
 
   const absolute = path.join(GENERATED_DIR, name)
   const stat = await fs.stat(absolute).catch(() => null)
   if (!stat?.isFile()) {
-    return NextResponse.json({ error: 'not_found', message: 'Unknown media file' }, { status: 404 })
+    return jsonNotFound()
   }
 
   const type = contentTypeFor(name)
