@@ -1,7 +1,8 @@
-// Reelforge — clean-room AI video generation studio (Phase 3)
-// Prisma schema: credits ledger + generation job pipeline + edit layer.
-// Note: CreditTransaction is APPEND-ONLY by convention — never update or delete rows.
-// Phase 5: Job.shareToken powers public unlisted share pages (/share/<token>).
+// Somnia — clean-room AI video studio.
+// Prisma schema: multi-user accounts + sessions, per-user credit ledger
+// (APPEND-ONLY by convention — never update or delete rows), generation job
+// pipeline with ordered keyframes (up to 16), boards, likes, API keys and
+// agent runs.
 
 generator client {
   provider = "prisma-client-js"
@@ -13,52 +14,106 @@ datasource db {
 }
 
 model User {
-  id        String   @id @default("demo")
-  credits   Int      @default(500)
+  id             String    @id @default(cuid())
+  email          String    @unique
+  passwordHash   String? // null for OAuth-only accounts
+  name           String
+  avatarSeed     String    @default("aurora")
+  plan           String    @default("trial") // trial | spark | studio | infinite
+  planCycleStart DateTime? // start of the current monthly cycle (pool grants land each cycle)
+  credits        Int       @default(0)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  jobs      Job[]
+  ledger    CreditTransaction[]
+  sessions  Session[]
+  boards    Board[]
+  likes     Like[]
+  apiKeys   ApiKey[]
+  agentRuns AgentRun[]
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  tokenHash String   @unique // sha256 of the opaque cookie token
+  userId    String
+  expiresAt DateTime
   createdAt DateTime @default(now())
 
-  jobs         Job[]
-  transactions CreditTransaction[]
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model Job {
-  id              String   @id @default(cuid())
-  userId          String
-  prompt          String
-  /** Phase 8: creation surface — 'video' (default, legacy rows) or 'image' (single still). */
-  kind            String   @default("video")
-  tier            String // 'draft' | 'quality'
-  durationSec     Int      @default(5) // 0 for image jobs (no clip length)
-  aspectRatio     String // '16:9' | '9:16' | '1:1'
-  startFramePath  String?
-  endFramePath    String? // Phase 2: optional pinned end frame
-  board           String? // Phase 2: optional organizer label
-  parentJobId     String? // Phase 3: edit-thread lineage (plain column — resolved by query, no FK)
-  editInstruction String? // Phase 3: raw instruction of the edit that created this child job
-  shareToken      String?  @unique // Phase 5: public unlisted /share/<token> link (null = not shared)
-  sharedAt        DateTime? // Phase 5: when the share link was (re)enabled
-  status          String // 'queued' | 'dispatched' | 'running' | 'moderated' | 'completed' | 'failed'
-  progress        Int      @default(0)
-  errorMessage    String?
-  creditsCharged  Int      @default(0)
-  providerCostUsd Float    @default(0)
-  idempotencyKey  String   @unique
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id             String   @id @default(cuid())
+  userId         String
+  kind           String   @default("video") // video | image
+  mode           String   @default("create") // create | modify | extend | agent | remix
+  prompt         String
+  enhancedPrompt String? // brainstorm variant actually used (if any)
+  model          String   @default("pulse-3") // pulse-3 | pulse-flash | prism
+  resolution     String   @default("720p") // 540p | 720p | 1080p
+  aspectRatio    String   @default("16:9")
+  durationSec    Int      @default(5) // 5 | 10 (0 for image jobs)
+  hdr            Boolean  @default(false)
+  loop           Boolean  @default(false)
+  startFramePath String? // first pinned frame (image-to-video / keyframes)
+  endFramePath   String? // last pinned frame
+  parentJobId    String? // edit-thread lineage
+  sourceJobId    String? // extend / modify / remix source job
+  agentRunId     String?
+  boardId        String?
+  status         String   @default("queued") // queued | dispatched | running | moderated | completed | failed
+  progress       Int      @default(0)
+  errorMessage   String?
+  creditsCharged Int      @default(0)
+  providerCostUsd Float   @default(0)
+  idempotencyKey String   @unique
+  shareToken     String?  @unique // public unlisted /share/<token> link
+  sharedAt       DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
-  user         User              @relation(fields: [userId], references: [id])
+  user         User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  board        Board?             @relation(fields: [boardId], references: [id])
+  keyframes    Keyframe[]
   generations  Generation[]
   assets       Asset[]
   transactions CreditTransaction[]
+  likes        Like[]
+}
+
+// Ordered pinned timeline frames for a job (Luma-style keyframes, max 16).
+model Keyframe {
+  id        String   @id @default(cuid())
+  jobId     String
+  order     Int // 1..16 position in the pinned timeline
+  path      String
+  createdAt DateTime @default(now())
+
+  job Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
 }
 
 model Generation {
   id         String   @id @default(cuid())
   jobId      String
-  provider   String // 'demo' | 'fal'
+  provider   String // 'demo' | 'fal' | 'selfhosted'
   status     String // 'queued' | 'dispatched' | 'running' | 'succeeded' | 'failed'
   framesJson String   @default("[]")
-  videoPath  String? // Phase 2: public-relative path of the rendered MP4 (when produced)
+  videoPath  String?
+  imagePath  String?
+  createdAt  DateTime @default(now())
+
+  job Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
+}
+
+model Asset {
+  id         String   @id @default(cuid())
+  jobId      String
+  kind       String // frame | startFrame | endFrame | video | reframe | camera | upscale | poster
+  path       String
+  label      String?
+  variantKey String? // idempotency key per (job, variant) — e.g. "reframe-9x16", "upscale-4k"
   createdAt  DateTime @default(now())
 
   job Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
@@ -66,27 +121,68 @@ model Generation {
 
 // APPEND-ONLY ledger: every credit grant, charge and refund is recorded here.
 model CreditTransaction {
-  id           String   @id @default(cuid())
-  userId       String
-  jobId        String?
-  amount       Int // signed: negative = charge, positive = grant/refund
-  kind         String // 'grant' | 'generation' | 'refund'
-  balanceAfter Int
-  createdAt    DateTime @default(now())
+  id             String    @id @default(cuid())
+  userId         String
+  jobId          String?
+  amount         Int // signed: negative = charge, positive = grant/refund
+  kind           String // 'signup' | 'monthly' | 'spend' | 'refund' | 'topup'
+  note           String?
+  balanceAfter   Int
+  idempotencyKey String?   @unique // dedupe key for charged spends (e.g. job idempotency key)
+  createdAt      DateTime  @default(now())
 
-  user User @relation(fields: [userId], references: [id])
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
   job  Job? @relation(fields: [jobId], references: [id])
 }
 
-// Phase 3 transform kinds are 'reframe' (re-crop) and 'camera' (virtual camera move).
-model Asset {
-  id         String   @id @default(cuid())
-  jobId      String
-  kind       String // 'frame' | 'startFrame' | 'endFrame' | 'video' | 'reframe' | 'camera'
-  path       String
-  label      String? // Phase 3: human label for transform variants (e.g. "9:16 crop", "Push in")
-  variantKey String? // Phase 3: idempotency key per (job, variant) — e.g. "reframe-9x16", "camera-push-in"
-  createdAt  DateTime @default(now())
+model Board {
+  id          String    @id @default(cuid())
+  userId      String
+  name        String
+  description String?
+  shareToken  String?   @unique // public board share link
+  sharedAt    DateTime?
+  createdAt   DateTime  @default(now())
 
-  job Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  user User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  jobs Job[]
+}
+
+model Like {
+  id        String   @id @default(cuid())
+  userId    String
+  jobId     String
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  job  Job  @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, jobId])
+}
+
+model ApiKey {
+  id         String    @id @default(cuid())
+  userId     String
+  name       String
+  prefix     String // first characters shown in the UI
+  hash       String    @unique // sha256 of the full key
+  lastUsedAt DateTime?
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model AgentRun {
+  id            String    @id @default(cuid())
+  userId        String
+  goal          String
+  planJson      String    @default("[]") // serialized plan steps
+  status        String    @default("planning") // planning | running | completed | failed
+  variations    Int       @default(0)
+  creditsBudget Int       @default(0)
+  createdAt     DateTime  @default(now())
+  completedAt   DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
