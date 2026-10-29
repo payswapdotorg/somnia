@@ -11,6 +11,8 @@ import { db } from '@/lib/db'
 import { signup } from '@/lib/auth'
 import { createJob } from '@/lib/engine'
 import { processJob, processQueuedJobs, type FrameSource } from '@/lib/pipeline'
+import type { HostedVideoProvider } from '@/lib/providers'
+import { providerCostUsd } from '@/lib/economics'
 import { balance } from '@/lib/ledger'
 import { absoluteFromPublic } from '@/lib/frames'
 import { promises as fs } from 'node:fs'
@@ -234,5 +236,120 @@ describe('pipeline — sweep', () => {
 
     // second sweep finds nothing
     expect(await processQueuedJobs({ frameSource: fakeFrameSource().source })).toBe(0)
+  })
+})
+
+// ------------------------------------------------- provider economics (T7)
+
+/** Minimal hosted provider: succeeds instantly, no ingest, name is the point. */
+function fakeHosted(name: 'selfhosted' | 'fal'): HostedVideoProvider {
+  return {
+    name,
+    get configured() {
+      return true
+    },
+    async render(input) {
+      return { videoPath: `/generated/${input.jobId}.mp4`, frames: [] }
+    },
+  }
+}
+
+describe('pipeline — provider cost stamping', () => {
+  it('stamps the fal table cost on the job when the fal tier renders it', async () => {
+    const user = await newUser()
+    const job = await createJob({ userId: user.id, prompt: 'hosted economics clip' })
+    const done = await processJob(job.id, { provider: fakeHosted('fal') })
+
+    expect(done.status).toBe('completed')
+    const expected = providerCostUsd({
+      provider: 'fal',
+      kind: 'video',
+      model: job.model,
+      resolution: job.resolution,
+      durationSec: job.durationSec,
+      hdr: job.hdr,
+    })
+    expect(expected).toBeGreaterThan(0)
+    expect(done.providerCostUsd).toBeCloseTo(expected, 6)
+
+    const generation = await db.generation.findFirst({ where: { jobId: job.id } })
+    expect(generation?.provider).toBe('fal')
+  })
+
+  it('stamps the selfhosted table cost when the selfhosted tier renders it', async () => {
+    const user = await newUser()
+    const job = await createJob({ userId: user.id, prompt: 'gpu economics clip' })
+    const done = await processJob(job.id, { provider: fakeHosted('selfhosted') })
+
+    const expected = providerCostUsd({
+      provider: 'selfhosted',
+      kind: 'video',
+      model: job.model,
+      resolution: job.resolution,
+      durationSec: job.durationSec,
+      hdr: job.hdr,
+    })
+    expect(expected).toBeGreaterThan(0)
+    expect(done.providerCostUsd).toBeCloseTo(expected, 6)
+  })
+
+  it('prices HDR 10s hosted renders through the same model (base x2 x1.5)', async () => {
+    const user = await newUser()
+    const job = await createJob({
+      userId: user.id,
+      prompt: 'long hdr hosted clip',
+      model: 'pulse-flash',
+      resolution: '540p',
+      durationSec: 10,
+      hdr: true,
+    })
+    const done = await processJob(job.id, { provider: fakeHosted('fal') })
+    const base = providerCostUsd({
+      provider: 'fal', kind: 'video', model: 'pulse-flash', resolution: '540p', durationSec: 5,
+    })
+    expect(done.providerCostUsd).toBeCloseTo(base * 2 * 1.5, 6)
+  })
+
+  it('leaves local demo renders at zero provider cost', async () => {
+    const user = await newUser()
+    const job = await createJob({ userId: user.id, prompt: 'free local clip' })
+    const done = await processJob(job.id, {
+      frameSource: fakeFrameSource().source,
+      provider: null,
+    })
+
+    expect(done.status).toBe('completed')
+    expect(done.providerCostUsd).toBe(0)
+    const generation = await db.generation.findFirst({ where: { jobId: job.id } })
+    expect(generation?.provider).toBe('demo')
+  })
+
+  it('stamps prism stills with the demo image cost (zero until hosted)', async () => {
+    const user = await newUser()
+    const job = await createJob({ userId: user.id, kind: 'image', prompt: 'ember orchids still' })
+    const done = await processJob(job.id, { frameSource: fakeFrameSource().source })
+
+    expect(done.status).toBe('completed')
+    expect(done.providerCostUsd).toBe(0)
+  })
+
+  it('leaves the cost stamped even when a hosted render fails (real money)', async () => {
+    const user = await newUser()
+    const job = await createJob({ userId: user.id, prompt: 'doomed hosted clip' })
+    const failing: HostedVideoProvider = {
+      name: 'fal',
+      get configured() {
+        return true
+      },
+      async render() {
+        throw new Error('gateway 500')
+      },
+    }
+    const done = await processJob(job.id, { provider: failing })
+
+    expect(done.status).toBe('failed')
+    expect(done.providerCostUsd).toBeGreaterThan(0)
+    // ...while the customer is made whole
+    expect(await balance(user.id)).toBe(1000 - 100 + 100)
   })
 })

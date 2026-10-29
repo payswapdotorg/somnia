@@ -1,14 +1,19 @@
 // src/lib/agents.ts — Somnia creative agents.
 //
-// An agent run turns a goal into a deterministic multi-shot plan (variation
-// count gated by the user's plan multiplier), then dispatches one generation
-// job per plan step — all linked to the run and charged normally through the
-// engine. Planning is pure (no LLM, no network) so it is fully testable;
-// swapping in a hosted planner later only replaces planAgentRun internals.
+// An agent run turns a goal into a multi-shot plan, then dispatches one
+// generation job per plan step — all linked to the run and charged
+// normally through the engine. Planning is LLM-first (src/lib/planner.ts:
+// server-side chat completion, strictly sanitized) with the deterministic
+// angle builder as an always-available fallback, so an LLM outage never
+// blocks planning. Which planner produced the plan is recorded on the run
+// (`planner: 'llm' | 'heuristic'`) and surfaced in the run view.
 
 import { db } from '@/lib/db'
 import { createJob } from '@/lib/engine'
 import { agentVariationCap } from '@/lib/plans'
+import { llmPlanner, type LlmPlanner, type PlannerShot } from '@/lib/planner'
+
+export type { LlmPlanner, PlannerShot }
 
 export interface PlanStep {
   shot: number
@@ -22,6 +27,7 @@ export interface AgentRunView {
   status: string
   variations: number
   creditsBudget: number
+  planner: string
   plan: PlanStep[]
   createdAt: Date
   completedAt: Date | null
@@ -48,14 +54,49 @@ function buildPlan(goal: string, count: number): PlanStep[] {
   })
 }
 
+/** Clamp an accepted LLM plan to the cap and pad short plans heuristically. */
+function fitPlan(shots: PlannerShot[], goal: string, cap: number): PlanStep[] {
+  const kept = shots.slice(0, cap)
+  const padding =
+    kept.length < cap ? buildPlan(goal, cap).slice(kept.length) : []
+  return [...kept, ...padding].map((step, i) => ({
+    shot: i + 1,
+    prompt: step.prompt,
+    note: step.note,
+  }))
+}
+
+export interface PlanAgentRunOptions {
+  /** Planner override (tests inject fakes; production uses the LLM planner). */
+  planner?: LlmPlanner
+}
+
 /** Plan a run from a goal. Creates the AgentRun row (status 'planning'). */
-export async function planAgentRun(userId: string, goal: string) {
+export async function planAgentRun(
+  userId: string,
+  goal: string,
+  opts: PlanAgentRunOptions = {}
+) {
   const cleaned = (goal ?? '').trim().replace(/\s+/g, ' ')
   if (cleaned.length < 3) throw new Error('goal must be at least 3 characters')
 
   const user = await db.user.findUniqueOrThrow({ where: { id: userId } })
   const cap = agentVariationCap(user.plan)
-  const plan = buildPlan(cleaned, cap)
+
+  // LLM-first; any decline/throw falls back to the deterministic builder.
+  const planner = opts.planner ?? llmPlanner
+  let plan: PlanStep[] | null = null
+  let used: 'llm' | 'heuristic' = 'heuristic'
+  try {
+    const shots = await planner(cleaned, cap)
+    if (shots && shots.length > 0) {
+      plan = fitPlan(shots, cleaned, cap)
+      used = 'llm'
+    }
+  } catch {
+    plan = null
+  }
+  if (!plan) plan = buildPlan(cleaned, cap)
 
   const run = await db.agentRun.create({
     data: {
@@ -65,6 +106,7 @@ export async function planAgentRun(userId: string, goal: string) {
       status: 'planning',
       variations: 0,
       creditsBudget: 0,
+      planner: used,
     },
   })
   return { run, plan }
@@ -115,6 +157,7 @@ export async function getAgentRun(userId: string, runId: string): Promise<AgentR
     status: run.status,
     variations: run.variations,
     creditsBudget: run.creditsBudget,
+    planner: run.planner,
     plan: JSON.parse(run.planJson || '[]'),
     createdAt: run.createdAt,
     completedAt: run.completedAt,

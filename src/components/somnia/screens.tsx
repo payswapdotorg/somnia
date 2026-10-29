@@ -27,14 +27,23 @@ const REMIX_STORAGE_KEY = 'somnia:remix'
 function useRemixPrefill(): RemixPrefill | null {
   const [prefill, setPrefill] = useState<RemixPrefill | null>(null)
   useEffect(() => {
-    try {
-      const raw = window.sessionStorage.getItem(REMIX_STORAGE_KEY)
-      if (raw) {
-        window.sessionStorage.removeItem(REMIX_STORAGE_KEY)
-        setPrefill(JSON.parse(raw) as RemixPrefill)
+    // Deferred out of the synchronous effect body (cascading-render guard):
+    // still reads once after mount and still consumes the hand-off one-shot.
+    let alive = true
+    queueMicrotask(() => {
+      if (!alive) return
+      try {
+        const raw = window.sessionStorage.getItem(REMIX_STORAGE_KEY)
+        if (raw) {
+          window.sessionStorage.removeItem(REMIX_STORAGE_KEY)
+          setPrefill(JSON.parse(raw) as RemixPrefill)
+        }
+      } catch {
+        // malformed hand-off — ignore it
       }
-    } catch {
-      // malformed hand-off — ignore it
+    })
+    return () => {
+      alive = false
     }
   }, [])
   return prefill

@@ -1,38 +1,42 @@
 # Somnia — repo handoff instructions
 
-> **Current state (T6, hosted tiers + agents UI + landing):** on top of the
-> T4b tree (domain core 104 specs, HTTP surface 43 specs, ffmpeg pipeline 8
-> specs, six authenticated surfaces) three things landed:
+> **Current state (T7, hosted provider economics + LLM planning):** on top of
+> the T6 tree (hosted tiers, agents UI, landing — 217 specs) three things
+> landed:
 >
-> 1. **Hosted provider tiers** (`src/lib/providers/`, 14 specs) —
->    `SELFHOSTED_URL` (two-endpoint queue gateway: submit → poll → ingest
->    MP4 + frames, optional bearer auth, remote progress mirrored into the
->    job row) and `FAL_KEY` (fal.ai-shaped queue, `Key` auth,
->    `FAL_QUEUE_BASE` retargetable). Resolution is selfhosted → fal → demo,
->    re-read from env on every job; `/api/providers/health` names the active
->    tier. Adapters are pure HTTP + download — the pipeline owns every DB
->    write, so hosted and local renders share identical charge/refund/asset
->    semantics. VIDEO jobs only; prism stills stay local; pinned timelines
->    send first/last frames as start/end.
-> 2. **Agent-run UI** (`/agents`, 5 jsdom specs) — goal → plan cards →
->    dispatch → live polling of the run + its linked jobs to settlement
->    with Watch-clip links. Includes a real fix this surfaced:
->    `POST /api/agents/:id/start` now kicks the render pipeline for every
->    dispatched job (previously they sat `queued` forever).
-> 3. **Marketing landing** (3 jsdom specs) — signed-out visitors to `/` get
->    the hero, six product pillars and the public plan catalogue (one
->    `/api/plans` fetch, graceful degradation) instead of the composer.
+> 1. **Hosted provider economics** (`src/lib/economics.ts`, 12 specs) — the
+>    per-(provider x model x resolution) USD cost table that finally writes
+>    `Job.providerCostUsd` for real: the pipeline stamps it at dispatch time
+>    (demo/local composites = $0; selfhosted/fal look up the table). Provider
+>    cost scales ~linearly with render time (10s = 2x — NOT the 3x retail
+>    ladder), HDR x1.5, prism stills flat. `SOMNIA_PROVIDER_COSTS` (JSON)
+>    deep-merges over the built-ins so operators pin actual pricing without
+>    code changes. The stamp deliberately survives failures: refunded
+>    customers, but real GPU/API money — the lens stays honest.
+> 2. **The margin lens** (`src/lib/insights.ts` + `GET /api/insights`, 11
+>    specs) — caller-scoped snapshot: job totals, ledger flow by kind,
+>    revenue proxy (consumed credits x `usdPerCredit(plan)` — derived from
+>    the real plan ladder, trial = $0), provider cost, gross margin (never
+>    NaN), and the per-(provider x model x resolution) tier table. Two flat
+>    queries + in-memory join (jobs x generations), no N+1.
+> 3. **LLM agent planning** (`src/lib/planner.ts` + agents.ts, 16 specs) —
+>    `planAgentRun` is now LLM-first: server-side chat completion decomposes
+>    the goal into shots; output is treated as untrusted (fences stripped,
+>    outer object located defensively, prompts bounded 3..500 chars, notes
+>    capped, shots renumbered, plan clamped/padded to the variation cap).
+>    Any decline/throw/malformation falls back to the deterministic angle
+>    builder — an LLM outage never blocks planning. `AgentRun.planner`
+>    (additive schema field, default 'heuristic') records which planner ran.
+>    Hermetic under SOMNIA_TEST; the live path was smoke-verified in the dev
+>    sandbox (`scripts/smoke-planner.ts`).
 >
-> The whole suite is **217 specs green**, `tsc --noEmit` clean.
-> Browser-verified end to end: signup → agents goal → plan → dispatch →
-> both variations rendered to real seekable MP4s; a scripted local GPU
-> gateway behind `SELFHOSTED_URL` took a composer job through submit →
-> polled progress → ingested MP4 → 200/206 media streaming; sign-out
-> landing with the catalogue.
-> **Next (T7):** hosted provider economics (per-model providerCostUsd so
-> the margin lens works on hosted tiers); agent planning via LLM; board
+> Also: pre-existing `react-hooks/set-state-in-effect` lint error in
+> `screens.tsx` fixed (remix hand-off read deferred to a microtask — same
+> one-shot semantics, no cascading render). The whole suite is **256 specs
+> green**, `tsc --noEmit` clean, `eslint .` zero errors.
+> **Next (T8):** an Insights/usage UI surface for the margin lens; board
 > cover stills / OG imagery for the landing; durable storage (Turso/Neon)
-> and blob media.
+> and blob media; multi-model routing across hosted + self-hosted tiers.
 
 ---
 

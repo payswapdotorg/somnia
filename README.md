@@ -48,7 +48,10 @@ research only, under original names (Pulse / Prism models, credit pools).
 - **Agent runs (`/agents`)** — describe a goal, review the plan-gated
   variation set (trial 2 · spark 2 · studio 4 · infinite 6 shots), dispatch
   it, and watch every linked job poll to settlement with its rendered clip —
-  all behind the same credit ledger.
+  all behind the same credit ledger. Planning is LLM-first (`src/lib/planner.ts`:
+  chat-completion shot decomposition, strictly sanitized JSON) with the
+  deterministic angle builder as an always-available fallback — the run row
+  records which planner produced the plan.
 - **Share pages** — `/share/<token>` (job) and `/boards/<token>` (board):
   zero-JS, server-rendered, unlisted by design (noindex + robots.txt).
 - **Marketing landing** — signed-out visitors to `/` get an original hero,
@@ -58,6 +61,10 @@ research only, under original names (Pulse / Prism models, credit pools).
   and `FAL_KEY` (fal.ai-shaped queue) take over the VIDEO render path
   end-to-end: submit, poll with mirrored progress, ingest the finished MP4;
   the demo pipeline stays the always-available fallback.
+- **Margin lens (`GET /api/insights`)** — the caller-scoped economics
+  snapshot: job totals, ledger flow, revenue proxy (consumed credits priced
+  at the plan rate), provider cost, gross margin, and a per-(provider x
+  model x resolution) tier table.
 
 ## Credit economics (from `src/lib/plans.ts`)
 
@@ -73,14 +80,36 @@ image 20 — all flat. Failed generations refund in full. Every job stores
 
 (5s base credits; 10s = 3x.)
 
+## Provider economics (from `src/lib/economics.ts`)
+
+Provider cost is what a render costs the OPERATOR, stamped on the job at
+dispatch time. Retail and cost use different duration ladders on purpose:
+retail prices 10s at 3x (value ladder) while provider spend scales ~linearly
+with render time (10s = 2x); HDR adds 1.5x compute; loops are free. Demo/local
+composites cost $0. Numbers are clean-room planning estimates — pin actual
+pricing via `SOMNIA_PROVIDER_COSTS` (JSON in the same shape as
+`DEFAULT_PROVIDER_COSTS`, merged per provider/model/resolution) without a
+code change.
+
+| Provider USD / 5s | pulse-3 540p | 720p | 1080p | flash 540p | 720p | 1080p | prism still |
+|--------------------|------|------|-------|------|------|-------|-------|
+| selfhosted         | 0.04 | 0.09 | 0.22  | 0.02 | 0.05 | 0.13  | 0.004 |
+| fal                | 0.06 | 0.12 | 0.30  | 0.03 | 0.06 | 0.15  | 0.01  |
+
+The margin lens prices consumed credits (spend − refunds) at the caller's
+plan rate (`usdPerCredit`: price / monthly credits; trial credits are free)
+and reports gross margin = (revenue − provider cost) / revenue. Failed hosted
+renders keep their cost stamp (real GPU/API money) while the customer is
+refunded — the lens stays honest about failure economics.
+
 ## The API surface (one serverless function)
 
 Every endpoint ships behind the single catch-all `src/app/api/[[...path]]/route.ts`
 → `src/lib/somnia-api.ts` (route table in that file's header comment):
-`auth/*`, `plans`, `credits`, `brainstorm`, `generate`, `image`, `jobs/:id`
-(+ `extend|modify|reframe|upscale|remix|share|like`), `jobs/shared/:token`,
-`boards` (+ `:id`, `:id/share`, `shared/:token`), `keys`, `agents`,
-`ideas`, `media/*` (Range-aware streaming), `providers/health`.
+`auth/*`, `plans`, `credits`, `insights`, `brainstorm`, `generate`, `image`,
+`jobs/:id` (+ `extend|modify|reframe|upscale|remix|share|like`),
+`jobs/shared/:token`, `boards` (+ `:id`, `:id/share`, `shared/:token`), `keys`,
+`agents`, `ideas`, `media/*` (Range-aware streaming), `providers/health`.
 
 ## Running locally
 
@@ -98,14 +127,15 @@ trial grant is 1,000 credits, no card required.
 ## Tests
 
 ```bash
-bun run test                # 217 specs: domain core, HTTP surface, render pipeline, UI contracts
+bun run test                # 256 specs: domain core, HTTP surface, render pipeline, UI contracts
 ```
 
-Domain (ledger, brainstorm, inputs, plans), engine, social, apikeys, agents,
-auth, the full HTTP dispatcher (43 specs), the ffmpeg pipeline (real MP4s),
-the hosted provider adapters (14 specs against a scripted local HTTP
-gateway), and jsdom contract tests for every UI surface (auth, composer,
-explore, history, boards/keys/plans, agents, landing).
+Domain (ledger, brainstorm, inputs, plans, economics), engine, social,
+apikeys, agents (+ LLM planner sanitizer), insights (the margin lens), auth,
+the full HTTP dispatcher, the ffmpeg pipeline (real MP4s), the hosted
+provider adapters (against a scripted local HTTP gateway), and jsdom
+contract tests for every UI surface (auth, composer, explore, history,
+boards/keys/plans, agents, landing).
 
 ## Wiring real generation providers
 

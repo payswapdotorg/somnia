@@ -45,6 +45,7 @@
 //   POST   agents/:id/start        → dispatch the plan (pre-flight balance)
 //   GET    agents/:id              → run view
 //   GET    ideas                   → public ideas feed (viewer-optional)
+//   GET    insights                → the caller's margin lens (auth, T7)
 //   GET    media/*                 → Range-aware media streaming
 //   GET    providers/health        → provider health snapshot
 
@@ -85,6 +86,7 @@ import { createApiKey, revokeApiKey, listApiKeys, resolveApiKey } from '@/lib/ap
 import { planAgentRun, startAgentRun, getAgentRun } from '@/lib/agents'
 import { suggestBrainstorms } from '@/lib/brainstorm'
 import { ensureMonthlyPool } from '@/lib/ledger'
+import { getInsights as getInsightsSnapshot } from '@/lib/insights'
 import { PLANS } from '@/lib/plans'
 import { serveMedia } from '@/lib/media-handler'
 import { getProviderHealth } from '@/lib/health'
@@ -507,6 +509,17 @@ async function getAgentDetail(user: User, runId: string): Promise<Response> {
   return json(view)
 }
 
+// ---------------------------------------------------------------- insights
+
+/** GET /api/insights — the caller-scoped margin lens (T7). */
+async function getInsights(user: User): Promise<Response> {
+  try {
+    return json(await getInsightsSnapshot(user.id))
+  } catch (error) {
+    return toErrorResponse(error)
+  }
+}
+
 // ---------------------------------------------------------------- dispatch
 
 export async function dispatchSomnia(request: Request, segments: string[]): Promise<Response> {
@@ -581,13 +594,14 @@ export async function dispatchSomnia(request: Request, segments: string[]): Prom
   // ------------------------------------------------------- authenticated
 
   if (
-    ['credits', 'brainstorm', 'generate', 'image', 'jobs', 'boards', 'keys', 'agents'].includes(
+    ['credits', 'brainstorm', 'generate', 'image', 'jobs', 'boards', 'keys', 'agents', 'insights'].includes(
       first ?? ''
     )
   ) {
     // Singleton routes: a wrong method/shape is a routing miss (404) — it
     // must not leak whether the caller is authenticated.
     if (first === 'credits' && (second || method !== 'GET')) return notFound()
+    if (first === 'insights' && (second || method !== 'GET')) return notFound()
     if (
       (first === 'brainstorm' || first === 'generate' || first === 'image') &&
       (second || method !== 'POST')
@@ -601,6 +615,8 @@ export async function dispatchSomnia(request: Request, segments: string[]): Prom
     const { user } = auth
 
     if (first === 'credits' && !second && method === 'GET') return getCredits(user)
+
+    if (first === 'insights' && !second && method === 'GET') return getInsights(user)
 
     if (first === 'brainstorm' && !second && method === 'POST') return postBrainstorm(request)
 

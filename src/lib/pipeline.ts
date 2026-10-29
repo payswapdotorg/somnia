@@ -26,6 +26,7 @@
 import sharp from 'sharp'
 import { db } from '@/lib/db'
 import { markJobCompleted, markJobFailed } from '@/lib/engine'
+import { providerCostUsd } from '@/lib/economics'
 import { framePath, writeBuffer } from '@/lib/frames'
 import { renderVideo } from '@/lib/video'
 import { resolveVideoProvider, type HostedVideoProvider } from '@/lib/providers'
@@ -179,10 +180,29 @@ export async function processJob(jobId: string, opts: ProcessOptions = {}): Prom
         ? opts.provider
         : resolveVideoProvider()
       : null
-  const generation = await db.generation.create({
-    data: { jobId: job.id, provider: provider?.name ?? 'demo', status: 'running' },
+
+  // T7 — provider economics: stamp what this render costs the operator at
+  // dispatch time. Demo/local compositing is free; hosted tiers look up the
+  // per-model table (env-overridable). The stamp survives failures on
+  // purpose: a failed hosted render still burns real GPU/API money, while
+  // the customer is made whole through the engine's refund.
+  const providerName = provider?.name ?? 'demo'
+  const costUsd = providerCostUsd({
+    provider: providerName,
+    kind: job.kind,
+    model: job.model,
+    resolution: job.resolution,
+    durationSec: job.durationSec || 5,
+    hdr: job.hdr,
+    loop: job.loop,
   })
-  await db.job.update({ where: { id: job.id }, data: { status: 'running', progress: 12 } })
+  const generation = await db.generation.create({
+    data: { jobId: job.id, provider: providerName, status: 'running' },
+  })
+  await db.job.update({
+    where: { id: job.id },
+    data: { status: 'running', progress: 12, providerCostUsd: costUsd },
+  })
 
   try {
     if (job.kind === 'image') {

@@ -705,3 +705,61 @@ describe('dispatch hygiene', () => {
     expect(status).toBe(200)
   })
 })
+
+// -------------------------------------------------------------- insights
+
+describe('insights — the margin lens (T7)', () => {
+  it('requires authentication', async () => {
+    const anon = await call('GET', 'insights')
+    expect(anon.status).toBe(401)
+  })
+
+  it('returns the caller-scoped economics snapshot with every lens block', async () => {
+    const { id: userId, token } = await newUser()
+    await completedVideoJob(userId, token)
+
+    const { status, body } = await call('GET', 'insights', { cookie: token })
+    expect(status).toBe(200)
+
+    expect(body.jobs).toMatchObject({ total: 1, completed: 1 })
+    expect(body.ledger.granted).toBe(1000)
+    expect(body.ledger.spent).toBe(100)
+    expect(body.ledger.balance).toBe(900)
+
+    // demo render: no provider cost, trial credits carry no revenue
+    expect(body.economics).toMatchObject({
+      revenueUsd: 0,
+      providerCostUsd: 0,
+      grossMarginPct: 0,
+    })
+
+    // the completed pulse-3 720p job appears in the tier table
+    const tier = body.tiers.find(
+      (t: any) => t.model === 'pulse-3' && t.resolution === '720p'
+    )
+    expect(tier).toMatchObject({ provider: 'demo', jobs: 1, credits: 100, costUsd: 0 })
+    expect(tier.avgCostUsdPerJob).toBe(0)
+
+    // cross-check: the lens sees exactly this caller's job
+    const other = await newUser()
+    const solo = await call('GET', 'insights', { cookie: other.token })
+    expect(solo.body.jobs.total).toBe(0)
+    expect(solo.body.tiers).toEqual([])
+  })
+
+  it('prices consumed credits at the plan rate once the plan is paid', async () => {
+    const { id: userId, token } = await newUser()
+    // upgrade to spark ($30 / 10,000 credits) — pool lands on the credits read
+    await db.user.update({ where: { id: userId }, data: { plan: 'spark' } })
+    await call('GET', 'credits', { cookie: token }) // triggers the monthly grant
+
+    const { body } = await call('GET', 'insights', { cookie: token })
+    // nothing spent yet: zero revenue, zero cost, margin 0
+    expect(body.economics.revenueUsd).toBe(0)
+    expect(body.economics.grossMarginPct).toBe(0)
+
+    await completedVideoJob(userId, token) // 100 credits consumed
+    const after = await call('GET', 'insights', { cookie: token })
+    expect(after.body.economics.revenueUsd).toBeCloseTo(100 * (30 / 10_000), 8)
+  })
+})

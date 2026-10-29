@@ -179,6 +179,7 @@ model AgentRun {
   goal          String
   planJson      String    @default("[]") // serialized plan steps
   status        String    @default("planning") // planning | running | completed | failed
+  planner       String    @default("heuristic") // which planner produced planJson: llm | heuristic
   variations    Int       @default(0)
   creditsBudget Int       @default(0)
   createdAt     DateTime  @default(now())
