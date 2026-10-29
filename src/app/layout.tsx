@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "@/components/ui/toaster";
+import { BRAND } from "@/lib/brand";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -15,11 +16,10 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Reelforge — AI Video Studio",
-  description:
-    "Reelforge is an original clean-room AI video generation studio: prompt to playable MP4 clips with keyframe pinning, extend, boards, a credit ledger, and provider adapters.",
-  keywords: ["Reelforge", "AI video", "storyboard", "keyframes", "clean-room"],
-  authors: [{ name: "Reelforge" }],
+  title: `${BRAND.name} — AI Video Studio`,
+  description: BRAND.description,
+  keywords: [...BRAND.keywords],
+  authors: [{ name: BRAND.name }],
 };
 
 export default function RootLayout({
