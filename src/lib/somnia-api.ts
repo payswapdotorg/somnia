@@ -485,6 +485,14 @@ async function postAgents(request: Request, user: User): Promise<Response> {
 async function postAgentStart(user: User, runId: string): Promise<Response> {
   try {
     await startAgentRun(runId)
+    // Kick the render pipeline for every job the run dispatched — same
+    // contract as the generate/image routes (never in tests: SOMNIA_TEST
+    // keeps this hermetic and the suites drive processJob directly).
+    const dispatched = await db.job.findMany({
+      where: { agentRunId: runId, status: 'queued' },
+      select: { id: true },
+    })
+    for (const { id } of dispatched) kickPipeline(id)
     const view = await getAgentRun(user.id, runId)
     if (!view) return json({ error: 'not_found', message: 'No such agent run' }, 404)
     return json({ run: view })

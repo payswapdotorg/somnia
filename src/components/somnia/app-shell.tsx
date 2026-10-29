@@ -11,13 +11,14 @@ import { BRAND } from '@/lib/brand'
 import { AvatarBlob } from '@/components/somnia/bits'
 import type { SessionUser } from '@/hooks/use-session'
 
-export type ShellSection = 'create' | 'explore' | 'history' | 'boards' | 'keys' | 'plans'
+export type ShellSection = 'create' | 'explore' | 'history' | 'boards' | 'agents' | 'keys' | 'plans'
 
 const NAV: { key: ShellSection; href: string; label: string }[] = [
   { key: 'create', href: '/', label: 'Create' },
   { key: 'explore', href: '/explore', label: 'Explore' },
   { key: 'history', href: '/history', label: 'History' },
   { key: 'boards', href: '/boards', label: 'Boards' },
+  { key: 'agents', href: '/agents', label: 'Agents' },
   { key: 'keys', href: '/keys', label: 'API keys' },
   { key: 'plans', href: '/plans', label: 'Plans' },
 ]

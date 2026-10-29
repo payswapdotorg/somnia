@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process'
 import { resolveFfmpegBin } from '@/lib/runtime'
+import { resolveVideoProvider } from '@/lib/providers'
 
 import { db } from '@/lib/db'
 
@@ -112,10 +113,9 @@ export async function getProviderHealth(): Promise<ProviderHealthDto> {
     last5mStatuses.find((g) => g.status === status)?._count._all ?? 0
 
   return {
-    // The Somnia render pipeline (src/lib/pipeline.ts) drives jobs with the
-    // demo engine today; hosted/self-hosted adapters re-slot behind it when
-    // their env keys appear (display string only — never the values).
-    activeProvider: 'demo',
+    // The render pipeline resolves the hosted tier on every job (dynamic env
+    // getters); display string only — never the values.
+    activeProvider: resolveVideoProvider()?.name ?? 'demo',
     falConfigured: !!process.env.FAL_KEY,
     selfHostedConfigured: !!process.env.SELFHOSTED_URL,
     selfHostedModel: process.env.SELFHOSTED_URL

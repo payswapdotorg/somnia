@@ -17,6 +17,8 @@ import { HistoryApp } from '@/components/somnia/history-app'
 import { BoardsApp } from '@/components/somnia/boards-app'
 import { KeysApp } from '@/components/somnia/keys-app'
 import { PlansApp } from '@/components/somnia/plans-app'
+import { AgentsApp } from '@/components/somnia/agents-app'
+import { LandingApp } from '@/components/somnia/landing'
 import type { RemixPrefill } from '@/components/somnia/dto'
 
 const REMIX_STORAGE_KEY = 'somnia:remix'
@@ -51,6 +53,13 @@ export function CreateScreen() {
   const { user, loading, refresh, signOut } = useSession()
   const router = useRouter()
   const prefill = useRemixPrefill()
+
+  // Signed-out visitors get the marketing landing (hero, pillars, public
+  // plan catalogue) instead of the composer. While the session probe is in
+  // flight the app shell skeleton shows — no landing flash for signed-in
+  // makers, no composer flash for strangers.
+  if (!loading && !user) return <LandingApp />
+
   return (
     <AppShell
       user={user}
@@ -155,6 +164,27 @@ export function PlansScreen() {
       }}
     >
       <PlansApp user={user} />
+    </AppShell>
+  )
+}
+
+export function AgentsScreen() {
+  const { user, loading, refresh, signOut } = useSession()
+  const router = useRouter()
+  return (
+    <AppShell
+      user={user}
+      loading={loading}
+      current="agents"
+      signOut={() => {
+        void signOut().then(() => router.push('/'))
+      }}
+    >
+      <PageHeading
+        title="Agents"
+        subtitle="Describe a goal — the agent plans the shots, you dispatch them, the credits stay honest."
+      />
+      <AgentsApp user={user} onCreditsChanged={() => void refresh()} />
     </AppShell>
   )
 }

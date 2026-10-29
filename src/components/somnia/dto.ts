@@ -50,6 +50,7 @@ export interface JobView {
   shareToken: string | null
   sharedAt: string | null
   boardId: string | null
+  agentRunId: string | null
   createdAt: string
   keyframes: KeyframeView[]
   assets: AssetView[]
@@ -147,4 +148,23 @@ export function aspectClass(ratio: string): string {
     default:
       return 'aspect-video'
   }
+}
+
+/** Plan step rendered by POST /api/agents (deterministic multi-shot plan). */
+export interface AgentPlanStepView {
+  shot: number
+  prompt: string
+  note: string
+}
+
+/** Agent run view returned by the /api/agents routes. */
+export interface AgentRunView {
+  id: string
+  goal: string
+  status: string // planning | running | completed | failed
+  variations: number
+  creditsBudget: number
+  plan: AgentPlanStepView[]
+  createdAt: string
+  completedAt: string | null
 }

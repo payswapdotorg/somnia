@@ -45,10 +45,19 @@ research only, under original names (Pulse / Prism models, credit pools).
 - **Plans (`/plans`)** — the public credit ladder: Trial (1,000 one-time),
   Spark $30/10k, Studio $90/40k, Infinite $300/150k monthly credits with
   agent multipliers and queue priority.
-- **Agent runs** — goal-to-plan runs with plan-gated variation dispatch
-  (billed at the plan's multiplier), behind the same credit ledger.
+- **Agent runs (`/agents`)** — describe a goal, review the plan-gated
+  variation set (trial 2 · spark 2 · studio 4 · infinite 6 shots), dispatch
+  it, and watch every linked job poll to settlement with its rendered clip —
+  all behind the same credit ledger.
 - **Share pages** — `/share/<token>` (job) and `/boards/<token>` (board):
   zero-JS, server-rendered, unlisted by design (noindex + robots.txt).
+- **Marketing landing** — signed-out visitors to `/` get an original hero,
+  the six product pillars and the public plan catalogue instead of the
+  composer (no session probing — one public `/api/plans` fetch).
+- **Hosted provider tiers** — `SELFHOSTED_URL` (queue-style GPU gateway)
+  and `FAL_KEY` (fal.ai-shaped queue) take over the VIDEO render path
+  end-to-end: submit, poll with mirrored progress, ingest the finished MP4;
+  the demo pipeline stays the always-available fallback.
 
 ## Credit economics (from `src/lib/plans.ts`)
 
@@ -89,21 +98,44 @@ trial grant is 1,000 credits, no card required.
 ## Tests
 
 ```bash
-bun run test                # 195 specs: domain core, HTTP surface, render pipeline, UI contracts
+bun run test                # 217 specs: domain core, HTTP surface, render pipeline, UI contracts
 ```
 
 Domain (ledger, brainstorm, inputs, plans), engine, social, apikeys, agents,
 auth, the full HTTP dispatcher (43 specs), the ffmpeg pipeline (real MP4s),
-and jsdom contract tests for every UI surface (auth, composer, explore,
-history, boards/keys/plans).
+the hosted provider adapters (14 specs against a scripted local HTTP
+gateway), and jsdom contract tests for every UI surface (auth, composer,
+explore, history, boards/keys/plans, agents, landing).
 
 ## Wiring real generation providers
 
-The pipeline's frame source is pluggable: set `SELFHOSTED_URL` (queue-style
-GPU gateway — Wan 2.2 / LTX-2.5 / HunyuanVideo class) and/or `FAL_KEY`
-(fal.ai) and hosted imagery slots in behind the same composer, credits and
-ledger. Without keys the demo engine renders branded storyboard beats — every
-surface stays honest about what produced the pixels.
+Two hosted tiers slot behind the render pipeline (`src/lib/providers/`),
+resolved cost-control-first:
+
+1. **Self-hosted GPU gateway** — set `SELFHOSTED_URL` (any queue-style
+   wrapper around Wan 2.2 / LTX-2.5 / HunyuanVideo; optional
+   `SELFHOSTED_MODEL`, `SELFHOSTED_API_KEY`). Contract:
+   `POST {url}/v1/video/jobs` `{model, prompt, resolution, duration_sec,
+   aspect_ratio, hdr, loop, start_frame?, end_frame?}` → `{id}`, then
+   `GET {url}/v1/video/jobs/{id}` → `{status, progress?, error?,
+   video_url?, frames?}`. Remote progress is mirrored into the job row; the
+   finished MP4 is downloaded into `public/generated/<jobId>-provider.mp4`
+   (remote-URL fallback if the download fails).
+2. **fal.ai-style queue** — set `FAL_KEY` (optional `FAL_MODEL`, and
+   `FAL_QUEUE_BASE` to retarget the queue origin). Submit → status poll →
+   result fetch, `Authorization: Key <FAL_KEY>`.
+
+Hosted tiers render VIDEO jobs only (prism stills always stay local); a
+pinned timeline sends its first/last frames as `start_frame`/`end_frame`
+(that is what i2v/t2v models accept). Failures flow through the same engine
+refund path as local renders — a failed hosted job never costs credits.
+Without keys the demo pipeline renders branded storyboard beats; the health
+endpoint (`/api/providers/health`) always names the active tier.
+
+Adapters are pure HTTP + download — the pipeline owns every database write,
+so hosted and local renders share identical ledger, refund and asset
+semantics (pinned by `tests/providers.test.ts`, 14 specs against a scripted
+local gateway).
 
 ## Serverless notes (Vercel)
 

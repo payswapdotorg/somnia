@@ -1,0 +1,2 @@
+[gateway] fake GPU queue listening on http://127.0.0.1:9911
+[gateway] submit: {"model":"wan2.2-t2v-5b","prompt":"a bronze compass spinning on an old sea chart","resolution":"720p","duration_sec":5,"aspect_ratio":"16:9","hdr":false,"loop":false,"start_frame":null,"end_frame":null}

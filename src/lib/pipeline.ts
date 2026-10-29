@@ -8,10 +8,16 @@
 // server-side image SDK and falls back to an original Somnia-branded
 // placeholder — tests inject a fake so nothing here touches the network.
 //
-// Statuses flow queued → running → completed | failed. `markJobFailed`
-// (engine) refunds the full charge, so a failed render never costs the
-// user credits. Processing is idempotent: anything not `queued` (moderated,
-// completed, failed, already-running) is returned untouched.
+// T6a — hosted tiers: when SELFHOSTED_URL / FAL_KEY is configured the VIDEO
+// path delegates to the hosted provider (submit → poll → ingest the finished
+// MP4) instead of compositing keyframes locally. IMAGE jobs always keep the
+// local prism path. Hosted and local renders share the exact same DB
+// semantics: only `queued` jobs are picked up, failures refund through
+// markJobFailed, completion lands the asset rows via markJobCompleted.
+//
+// Statuses flow queued → running → completed | failed. Processing is
+// idempotent: anything not `queued` (moderated, completed, failed,
+// already-running) is returned untouched.
 //
 // The SDK import stays dynamic: environments where it cannot initialize
 // (serverless without credentials) fall straight through to the
@@ -22,6 +28,7 @@ import { db } from '@/lib/db'
 import { markJobCompleted, markJobFailed } from '@/lib/engine'
 import { framePath, writeBuffer } from '@/lib/frames'
 import { renderVideo } from '@/lib/video'
+import { resolveVideoProvider, type HostedVideoProvider } from '@/lib/providers'
 import type { Job } from '@prisma/client'
 
 // ---------------------------------------------------------------- frame source
@@ -151,6 +158,8 @@ function stillPath(jobId: string): string {
 
 export interface ProcessOptions {
   frameSource?: FrameSource
+  /** Hosted video provider override (null forces the local demo path). */
+  provider?: HostedVideoProvider | null
 }
 
 /**
@@ -163,8 +172,15 @@ export async function processJob(jobId: string, opts: ProcessOptions = {}): Prom
   if (job.status !== 'queued') return job
 
   const source = opts.frameSource ?? defaultFrameSource
+  // Hosted tiers render VIDEO jobs only — prism stills always stay local.
+  const provider =
+    job.kind === 'video'
+      ? opts.provider !== undefined
+        ? opts.provider
+        : resolveVideoProvider()
+      : null
   const generation = await db.generation.create({
-    data: { jobId: job.id, provider: 'demo', status: 'running' },
+    data: { jobId: job.id, provider: provider?.name ?? 'demo', status: 'running' },
   })
   await db.job.update({ where: { id: job.id }, data: { status: 'running', progress: 12 } })
 
@@ -180,6 +196,47 @@ export async function processJob(jobId: string, opts: ProcessOptions = {}): Prom
       await db.generation.update({
         where: { id: generation.id },
         data: { status: 'succeeded', imagePath: path },
+      })
+    } else if (provider) {
+      // ---- hosted tier: submit → poll (progress mirrored) → ingest ----
+      const result = await provider.render(
+        {
+          jobId: job.id,
+          prompt: job.prompt,
+          model: job.model,
+          resolution: job.resolution,
+          aspectRatio: job.aspectRatio,
+          durationSec: job.durationSec || 5,
+          hdr: job.hdr,
+          loop: job.loop,
+          startFramePath: job.startFramePath,
+          endFramePath: job.endFramePath,
+        },
+        {
+          onProgress: async (pct) => {
+            await db.job
+              .update({
+                where: { id: job.id },
+                data: { progress: Math.max(0, Math.min(99, pct)) },
+              })
+              .catch(() => undefined)
+          },
+        }
+      )
+
+      if (result.frames.length > 0) {
+        await db.asset.createMany({
+          data: result.frames.map((p) => ({ jobId: job.id, kind: 'frame', path: p })),
+        })
+      }
+      await markJobCompleted(job.id, { videoPath: result.videoPath })
+      await db.generation.update({
+        where: { id: generation.id },
+        data: {
+          status: 'succeeded',
+          framesJson: JSON.stringify(result.frames),
+          videoPath: result.videoPath,
+        },
       })
     } else {
       // ---- build the ordered timeline ----

@@ -1,28 +1,38 @@
 # Somnia — repo handoff instructions
 
-> **Current state (T4b, the UI is on the Somnia API):** the multi-user domain
-> core (accounts/sessions, credit ledger, generation engine, social, API keys,
-> agents — 104 specs), the complete HTTP surface (`src/lib/somnia-api.ts`,
-> 43 specs) and the ffmpeg render pipeline (`src/lib/pipeline.ts`, 8 specs)
-> are now surfaced by a full Somnia-branded UI. Six authenticated surfaces —
-> the cockpit composer (`/`, video + prism image modes, brainstorm variants,
-> 16-keyframe pins, live plans.ts cost preview, job polling to the finished
-> clip), explore/ideas (`/explore`, likes, pagination), history
-> (`/history`, extend/modify/reframe/upscale, unlisted share, remix prefill
-> hand-off via sessionStorage), boards (`/boards`), API keys (`/keys`) and
-> plans (`/plans`) — plus the session-aware AppShell, the rewired public
-> `/share/<token>` page and a new public `/boards/<token>` board viewer.
-> 36 jsdom contract specs pin the exact fetch contracts
-> (tests/{create,explore,history,account}-ui.test.tsx); the whole suite is
-> 195 specs green, `tsc --noEmit` clean. The Reelforge-era shell
-> (components, /studio, /models, /showcase pages, legacy lib modules,
-> marketing media) was deleted. Browser-verified end to end: signup →
-> compose → charged render to a real seekable MP4 → history → share →
-> public page → like → board create → key mint → Bearer API call → remix
-> prefill.
-> **Next (T6):** hosted provider adapters (FAL_KEY / SELFHOSTED_URL) slotting
-> behind the pipeline's FrameSource; agent-run UI on top of
-> POST /api/agents; a public marketing landing for signed-out visitors.
+> **Current state (T6, hosted tiers + agents UI + landing):** on top of the
+> T4b tree (domain core 104 specs, HTTP surface 43 specs, ffmpeg pipeline 8
+> specs, six authenticated surfaces) three things landed:
+>
+> 1. **Hosted provider tiers** (`src/lib/providers/`, 14 specs) —
+>    `SELFHOSTED_URL` (two-endpoint queue gateway: submit → poll → ingest
+>    MP4 + frames, optional bearer auth, remote progress mirrored into the
+>    job row) and `FAL_KEY` (fal.ai-shaped queue, `Key` auth,
+>    `FAL_QUEUE_BASE` retargetable). Resolution is selfhosted → fal → demo,
+>    re-read from env on every job; `/api/providers/health` names the active
+>    tier. Adapters are pure HTTP + download — the pipeline owns every DB
+>    write, so hosted and local renders share identical charge/refund/asset
+>    semantics. VIDEO jobs only; prism stills stay local; pinned timelines
+>    send first/last frames as start/end.
+> 2. **Agent-run UI** (`/agents`, 5 jsdom specs) — goal → plan cards →
+>    dispatch → live polling of the run + its linked jobs to settlement
+>    with Watch-clip links. Includes a real fix this surfaced:
+>    `POST /api/agents/:id/start` now kicks the render pipeline for every
+>    dispatched job (previously they sat `queued` forever).
+> 3. **Marketing landing** (3 jsdom specs) — signed-out visitors to `/` get
+>    the hero, six product pillars and the public plan catalogue (one
+>    `/api/plans` fetch, graceful degradation) instead of the composer.
+>
+> The whole suite is **217 specs green**, `tsc --noEmit` clean.
+> Browser-verified end to end: signup → agents goal → plan → dispatch →
+> both variations rendered to real seekable MP4s; a scripted local GPU
+> gateway behind `SELFHOSTED_URL` took a composer job through submit →
+> polled progress → ingested MP4 → 200/206 media streaming; sign-out
+> landing with the catalogue.
+> **Next (T7):** hosted provider economics (per-model providerCostUsd so
+> the margin lens works on hosted tiers); agent planning via LLM; board
+> cover stills / OG imagery for the landing; durable storage (Turso/Neon)
+> and blob media.
 
 ---
 
