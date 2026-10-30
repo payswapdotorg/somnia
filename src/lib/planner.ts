@@ -1,13 +1,17 @@
 // src/lib/planner.ts — LLM shot planning for agent runs (T7).
 //
 // Production planning decomposes a creative goal into a shot list through
-// the server-side LLM (dynamic SDK import — environments where it cannot
-// initialize fall straight through to the deterministic angle builder in
-// agents.ts; an LLM outage must never block planning). The model is asked
-// for strict JSON, and parsePlannerShots treats its output as untrusted:
-// fences are stripped, the outer object is located defensively, entries
-// are shape-checked, prompt length is bounded, and shots are renumbered.
-// Anything that does not survive becomes null -> heuristic fallback.
+// the hosted LLM tier (T13: any OpenAI-compatible endpoint, OpenRouter by
+// default — src/lib/llm.ts) with the sandbox z-ai SDK as the dev-sandbox
+// second chance; environments where neither initializes fall straight
+// through to the deterministic angle builder in agents.ts — an LLM outage
+// must never block planning. The model is asked for strict JSON, and
+// parsePlannerShots treats its output as untrusted: fences are stripped,
+// the outer object is located defensively, entries are shape-checked,
+// prompt length is bounded, and shots are renumbered. Anything that does
+// not survive becomes null -> heuristic fallback.
+
+import { hostedChatCompletion, hostedLlmConfig } from '@/lib/llm'
 
 export interface PlannerShot {
   shot: number
@@ -84,13 +88,33 @@ const SYSTEM_PROMPT = (count: number) =>
   'word camera/beat label. Vary angles and pacing across shots.'
 
 /**
- * The production planner: server-side LLM chat completion, strictly
- * sanitized. Returns null on any failure (SDK unavailable, network error,
- * malformed output) — never throws. Hermetic under SOMNIA_TEST so test
- * suites exercise the fallback deterministically.
+ * The hosted-tier planner (T13): the OpenAI-compatible endpoint when
+ * OPENROUTER_API_KEY is configured, null without traffic when not — the
+ * no-key default keeps byte-for-byte the pre-T13 behavior. Exported so the
+ * suite can drive it against a local gateway and inject it into
+ * planAgentRun as a production-shaped planner.
  */
-export const llmPlanner: LlmPlanner = async (goal, count) => {
-  if (process.env.SOMNIA_TEST) return null
+export async function plannerViaHosted(
+  goal: string,
+  count: number
+): Promise<PlannerShot[] | null> {
+  if (!hostedLlmConfig()) return null
+  const text = await hostedChatCompletion(
+    [
+      { role: 'system', content: SYSTEM_PROMPT(count) },
+      { role: 'user', content: goal },
+    ],
+    { temperature: 0.7, maxTokens: 800 }
+  )
+  if (!text) return null
+  return parsePlannerShots(text, goal, count)
+}
+
+/** The dev-sandbox planner: dynamic z-ai SDK import, sanitized identically. */
+async function plannerViaSdk(
+  goal: string,
+  count: number
+): Promise<PlannerShot[] | null> {
   try {
     const { default: ZAI } = await import('z-ai-web-dev-sdk')
     const zai = await ZAI.create()
@@ -111,4 +135,15 @@ export const llmPlanner: LlmPlanner = async (goal, count) => {
     )
     return null
   }
+}
+
+/**
+ * The production planner: hosted LLM first, the sandbox SDK as a second
+ * chance, strictly sanitized at every step. Returns null on any failure —
+ * never throws. Hermetic under SOMNIA_TEST so test suites exercise the
+ * fallback deterministically.
+ */
+export const llmPlanner: LlmPlanner = async (goal, count) => {
+  if (process.env.SOMNIA_TEST) return null
+  return (await plannerViaHosted(goal, count)) ?? (await plannerViaSdk(goal, count))
 }

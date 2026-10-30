@@ -3,6 +3,7 @@ import { resolveFfmpegBin } from '@/lib/runtime'
 import { resolveVideoProvider } from '@/lib/providers'
 import { isBlobConfigured } from '@/lib/blob'
 import { effectiveRoutes } from '@/lib/routing'
+import { hostedLlmConfig } from '@/lib/llm'
 
 import { db } from '@/lib/db'
 
@@ -18,6 +19,10 @@ export interface ProviderHealthDto {
   selfHostedModel: string | null
   /** Blob store wired (BLOB_READ_WRITE_TOKEN)? Boolean only — durable media vs per-instance scratch. */
   blobStorageConfigured: boolean
+  /** Hosted LLM wired (OPENROUTER_API_KEY)? Boolean only — agent planning via the real tier vs heuristic fallback. */
+  llmConfigured: boolean
+  /** Display string for the hosted LLM model id (or null). */
+  llmModel: string | null
   /** Effective per-model routing (T12): which tier serves each video model right now. */
   modelRoutes: Record<string, string>
   ffmpegAvailable: boolean
@@ -118,6 +123,8 @@ export async function getProviderHealth(): Promise<ProviderHealthDto> {
   const count5m = (status: string) =>
     last5mStatuses.find((g) => g.status === status)?._count._all ?? 0
 
+  const llm = hostedLlmConfig()
+
   return {
     // The render pipeline resolves the hosted tier on every job (dynamic env
     // getters); display string only — never the values.
@@ -128,6 +135,8 @@ export async function getProviderHealth(): Promise<ProviderHealthDto> {
       ? (process.env.SELFHOSTED_MODEL ?? 'wan2.2-t2v-5b')
       : null,
     blobStorageConfigured: isBlobConfigured(),
+    llmConfigured: !!llm,
+    llmModel: llm ? llm.model : null,
     modelRoutes: effectiveRoutes(),
     ffmpegAvailable: ffmpeg.available,
     ffmpegVersion: ffmpeg.version,
