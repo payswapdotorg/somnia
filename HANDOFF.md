@@ -17,9 +17,16 @@
 >    crossfade chain, H.264 yuv420p faststart 30fps, resolution CRF).
 >    Honest model id: `e2b-kenburns-cpu` — a CPU compositor of real AI
 >    imagery, not a GPU diffusion box, and health says exactly that. A
->    supervisor loop restarts the gateway if it dies; the sandbox lives 24h
->    (`up.mjs` reuses a live one or recreates + reprints wiring; `--kill`
->    stops the ~$0.166/h uptime meter; `--redeploy` hot-swaps code;
+>    supervisor loop (a STATIC script that re-sources `gateway.env` on every
+>    restart — key rotation rewrites the env file, never the running script)
+>    restarts the gateway if it dies. **The E2B Hobby plan caps sessions at
+>    ONE HOUR** — a 24h `setTimeout` is accepted by the API but silently
+>    clamped (verified live: boot 16:57, gone by ~17:57; the paused snapshot
+>    is not resumable — SDK 2.62.0 has pause but no resume). `rotate.mjs` is
+>    the one-command recovery: fresh sandbox + full contract self-test +
+>    Vercel env re-wire + production redeploy + health verify, ~110s end to
+>    end (`up.mjs` alone reuses a live gateway or recreates it; `--kill`
+>    stops the ~$0.166/h uptime meter; `--redeploy` hot-swaps gateway code;
 >    `--selftest` re-proves the contract).
 > 2. **Pinned-timeline fidelity (repo, TDD)** — `HostedRenderInput.keyframes`
 >    now carries the job's FULL ordered pinned timeline to hosted tiers (the
@@ -48,7 +55,8 @@
 >    1080p; prism $0.0005) — Insights margins now report real spend instead
 >    of the owned-GPU planning estimates.
 > 6. **Smoke-verified on production** (37/37, `scripts/t15-smoke.mjs`
->    outside the repo): health flips `activeProvider: selfhosted` with every
+>    outside the repo, re-run clean after the rotation): health flips
+>    `activeProvider: selfhosted` with every
 >    video model routed to the live tier; a prompt-only dream renders a REAL
 >    hosted MP4 in ~18s (`placeholderRender: false`, blob URL, $0.002 cost
 >    stamp, 3 gateway keyframes ingested as frame assets); a pinned-timeline
@@ -63,18 +71,21 @@
 > updated to the two-attempt contract). `tsc --noEmit` clean, `eslint .` zero
 > errors (same 11 pre-existing warnings). NOTE: the suite is network-bound
 > against the Neon test DB — chunk the run (~5 files per invocation).
-> **Known constraints, honestly:** the gateway URL changes when the sandbox
-> is recreated (re-run `vercel-wire.mjs` + redeploy); the sandbox bills
-> ~$0.166/h while idle (`up.mjs --kill` stops it — renders then fail-and-
-> refund until it is back); prism stills still render locally (placeholder
+> **Known constraints, honestly:** **the sandbox lapses after ONE HOUR**
+> (E2B Hobby session cap) — while it is down renders fail and refund
+> honestly, and `node scripts/e2b/rotate.mjs` brings the tier back in ~2
+> minutes (each rotation changes the gateway URL, so the env re-wire +
+> redeploy ride along); the sandbox bills ~$0.166/h while up (`up.mjs --kill`
+> stops the meter); prism stills still render locally (placeholder
 > art + honest flag on serverless — image jobs never route hosted);
 > keyless imagery latency varies 3-90s per render.
-> **Next (T16):** route prism image jobs through the gateway too (an image
-> endpoint beside the video queue — kills the last placeholder surface), and
-> automate the gateway keep-alive (a daily `up.mjs` cron, or E2B
-> pause/resume to hold the URL stable); the moment a real GPU or fal key
-> appears, swap the imagery source in `gateway.mjs` — the contract, routing
-> and failover already speak it.
+> **Next (T16):** make the tier durable — a stable-URL relay (a tiny app
+> route that forwards to the gateway URL held in a DB row, so rotation =
+> UPDATE one row, zero redeploys) plus a ~50-minute rotation cron; route
+> prism image jobs through the gateway too (kills the last placeholder
+> surface); or leave plan-limits behind entirely the moment a real GPU or
+> fal key appears — swap the imagery source in `gateway.mjs`, the contract,
+> routing and failover already speak it.
 
 ---
 

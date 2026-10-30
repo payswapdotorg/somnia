@@ -242,12 +242,15 @@ says so honestly:
   `pulse-3/pulse-flash`: $0.002 (540p/720p) / $0.003 (1080p), prism stills
   $0.0005. The sandbox also burns uptime while idle — `node up.mjs --kill`
   stops the meter; renders then fail-and-refund honestly until it is back.
-- **Lifecycle** — the sandbox lives up to 24h (its public URL is its
-  identity). The ops script is idempotent: `E2B_API_KEY=… node up.mjs`
-  reuses a live gateway or recreates everything (fresh URL → re-run
-  `vercel-wire.mjs` → redeploy). `--redeploy` hot-swaps gateway code;
-  `--selftest` re-proves the full contract. Keep-alive = re-run daily, or
-  accept honest fail-and-refund while it is down.
+- **Lifecycle** — **the E2B Hobby plan caps sandbox sessions at one hour**
+  (a 24h `setTimeout` is accepted by the API but silently clamped — verified
+  live). While the gateway is down renders fail and refund honestly;
+  `node rotate.mjs` brings the whole tier back in ~2 minutes (fresh sandbox
+  + self-test + Vercel env re-wire + redeploy + health verify). `up.mjs`
+  alone reuses a live gateway or creates one; `--redeploy` hot-swaps gateway
+  code; `--selftest` re-proves the contract; `--kill` stops the uptime meter.
+  Durable 24/7 operation needs the T16 relay (stable URL from a DB row) or a
+  plan/host without the session cap.
 - **Latency** — a 5s 540p render takes 10–90s wall (the keyless image
   endpoint's generation time dominates and varies); the API function runs at
   `maxDuration = 300` so every render settles inside its invocation, and the
