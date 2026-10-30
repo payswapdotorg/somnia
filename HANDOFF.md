@@ -42,6 +42,16 @@
 > `eslint .` zero errors (same 11 pre-existing warnings). The suite is
 > network-bound against the Neon test DB — chunk the run (fast units ~3min,
 > engine/pipeline ~5.5min, providers ~4min, api ~5min, UI ~2min).
+> **Smoke-verified on production** (9/9 checks, `scripts/t11-smoke.mjs`
+> outside the repo): health reports `blobStorageConfigured`, image + video
+> jobs land every keyframe and the MP4 as
+> `https://tkfmlqb986fn49zp.public.blob.vercel-storage.com/<key>` rows,
+> the store serves them publicly, a Range request answers **206
+> `bytes 0-1023/48280`** (native video seeking off the CDN — zero function
+> invocations per media view), and the share page pins the blob URL in
+> og:image verbatim. The clip rendered by one function instance was fetched
+> back from outside Vercel entirely — the cross-instance durability T11
+> exists to deliver.
 > **Next (T12):** multi-model routing across hosted + self-hosted tiers
 > (both adapters exist behind one interface; routing/health/failover policy
 > is the remaining work), plus wiring a real hosted provider key on Vercel.
