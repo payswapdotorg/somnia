@@ -33,3 +33,8 @@ yarn-error.log*
 # dev logs
 dev.log
 server.log
+
+# T16 rotation tooling — credentials never enter the tree
+scripts/e2b/rotate.env
+scripts/e2b/node_modules/
+scripts/e2b/__pycache__/

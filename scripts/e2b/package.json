@@ -1,0 +1,15 @@
+{
+  "name": "somnia-e2b-rotation",
+  "private": true,
+  "description": "T16 live-tier gateway rotation tooling (E2B sandbox lifecycle + TierGateway row upsert). Credentials live in rotate.env (gitignored, chmod 600) — never in this tree.",
+  "type": "module",
+  "scripts": {
+    "rotate": "node rotate.mjs",
+    "pause": "node up.mjs --kill",
+    "check": "node check-row.mjs"
+  },
+  "dependencies": {
+    "e2b": "^1.0.0",
+    "pg": "^8.13.0"
+  }
+}
