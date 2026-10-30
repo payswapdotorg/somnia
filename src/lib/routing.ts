@@ -61,6 +61,19 @@ export function configuredChain(): HostedVideoProvider[] {
   return chain
 }
 
+/** The tier's still-render capability: imageCapable + a real renderStill. */
+function isImageCapable(provider: HostedVideoProvider): boolean {
+  return provider.imageCapable === true && typeof provider.renderStill === 'function'
+}
+
+/**
+ * T16 — the configured tiers that can render IMAGE (prism) jobs, in
+ * cost-control order. Hosted stills kill the last placeholder surface.
+ */
+export function configuredImageChain(): HostedVideoProvider[] {
+  return configuredChain().filter(isImageCapable)
+}
+
 function byId(id: ProviderId): HostedVideoProvider | null {
   if (id === 'selfhosted') return selfHostedProvider.configured ? selfHostedProvider : null
   if (id === 'fal') return falProvider.configured ? falProvider : null
@@ -95,6 +108,23 @@ export function failoverOrder(model: string): HostedVideoProvider[] {
 }
 
 /**
+ * T16 — the render order for an IMAGE (prism) job: the image-capable tier
+ * pinned by SOMNIA_MODEL_ROUTES when configured, else the head of the
+ * image-capable chain. Empty → the local still path (placeholder-flagged on
+ * serverless, exactly the pre-T16 behavior). Failover only crosses REAL
+ * hosted image tiers; a routed-but-failing image job fails and refunds — it
+ * never silently degrades to placeholder art.
+ */
+export function failoverImageOrder(): HostedVideoProvider[] {
+  const pinned = modelRoutes()['prism']
+  if (pinned) {
+    const provider = byId(pinned)
+    if (provider && isImageCapable(provider)) return [provider]
+  }
+  return configuredImageChain()
+}
+
+/**
  * Effective routing for every shippable video model — the health surface:
  * which tier serves each model right now ('demo' = the local pipeline).
  * Pinned-but-unconfigured routes resolve to the chain fallback, matching
@@ -115,4 +145,18 @@ export function effectiveRoutes(): Record<string, ProviderId> {
     }
   }
   return out
+}
+
+/**
+ * T16 — effective routing for the IMAGE model (prism): 'selfhosted' when an
+ * image-capable hosted tier is configured, else 'demo' (the local still
+ * path). The pinned route wins only when its tier is BOTH configured and
+ * image-capable — a prism→fal pin cannot serve stills and falls back.
+ */
+export function effectiveImageRoutes(): Record<string, ProviderId> {
+  const chain = configuredImageChain()
+  if (chain.length > 0) {
+    return { prism: chain[0]!.name }
+  }
+  return { prism: 'demo' }
 }

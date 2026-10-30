@@ -15,6 +15,14 @@
 //          progress?: 0..100, error?: string,
 //          video_url?: string, frames?: string[] }
 //
+// T16 — the same gateway serves prism stills:
+//
+//   POST {SELFHOSTED_URL}/v1/image/jobs
+//        { model, prompt, resolution, aspect_ratio, start_frame?,
+//          keyframes }  → 202 { id }
+//   GET  {SELFHOSTED_URL}/v1/image/jobs/{id}
+//        { status, progress?, error?, image_url? }
+//
 // Frame fields carry public-relative paths (`/generated/...`) or durable
 // absolute URLs (blob CDN); gateways that need the pixels resolve them
 // (absolute URLs fetch directly, relative paths against the app origin).
@@ -29,6 +37,8 @@
 
 import { ingestAsset, sleep, timings } from '@/lib/providers/ingest'
 import type {
+  HostedImageInput,
+  HostedImageResult,
   HostedRenderInput,
   HostedRenderOptions,
   HostedRenderResult,
@@ -80,6 +90,13 @@ interface GatewayJobStatus {
   frames?: string[]
 }
 
+interface GatewayImageJobStatus {
+  status: 'queued' | 'running' | 'succeeded' | 'failed'
+  progress?: number
+  error?: string
+  image_url?: string | null
+}
+
 async function submitJobOnce(input: HostedRenderInput): Promise<{ id: string }> {
   const response = await fetch(`${baseUrl()}/v1/video/jobs`, {
     method: 'POST',
@@ -124,6 +141,45 @@ async function submitJob(input: HostedRenderInput): Promise<{ id: string }> {
   throw lastError instanceof Error ? lastError : new Error(String(lastError))
 }
 
+// T16 — prism stills ride the same gateway, the same resilience contract.
+async function submitImageJobOnce(input: HostedImageInput): Promise<{ id: string }> {
+  const response = await fetch(`${baseUrl()}/v1/image/jobs`, {
+    method: 'POST',
+    headers: gatewayHeaders(),
+    signal: AbortSignal.timeout(SUBMIT_TIMEOUT_MS),
+    body: JSON.stringify({
+      model: selfHostedModel(),
+      prompt: input.prompt,
+      resolution: input.resolution,
+      aspect_ratio: input.aspectRatio,
+      start_frame: input.startFramePath,
+      // A pinned still IS the user's imagery — pass it verbatim.
+      keyframes: input.keyframes ?? [],
+    }),
+  })
+  if (!response.ok) {
+    throw new Error(`self-hosted gateway rejected the still job: ${response.status}`)
+  }
+  const data = (await response.json()) as { id?: string }
+  if (!data.id) {
+    throw new Error('self-hosted gateway returned no still job id')
+  }
+  return { id: data.id }
+}
+
+async function submitImageJob(input: HostedImageInput): Promise<{ id: string }> {
+  let lastError: unknown = null
+  for (let attempt = 1; attempt <= SUBMIT_ATTEMPTS; attempt++) {
+    if (attempt > 1) await sleep(RETRY_DELAY_MS)
+    try {
+      return await submitImageJobOnce(input)
+    } catch (error) {
+      lastError = error
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(String(lastError))
+}
+
 async function pollJob(gatewayJobId: string): Promise<GatewayJobStatus> {
   const response = await fetch(
     `${baseUrl()}/v1/video/jobs/${encodeURIComponent(gatewayJobId)}`,
@@ -133,6 +189,17 @@ async function pollJob(gatewayJobId: string): Promise<GatewayJobStatus> {
     throw new Error(`self-hosted status poll failed: ${response.status}`)
   }
   return (await response.json()) as GatewayJobStatus
+}
+
+async function pollImageJob(gatewayJobId: string): Promise<GatewayImageJobStatus> {
+  const response = await fetch(
+    `${baseUrl()}/v1/image/jobs/${encodeURIComponent(gatewayJobId)}`,
+    { headers: gatewayHeaders(), signal: AbortSignal.timeout(10_000) }
+  )
+  if (!response.ok) {
+    throw new Error(`self-hosted image poll failed: ${response.status}`)
+  }
+  return (await response.json()) as GatewayImageJobStatus
 }
 
 async function renderSelfHosted(
@@ -210,10 +277,76 @@ async function renderSelfHosted(
   throw new Error('self-hosted render timed out')
 }
 
+/**
+ * T16 — render one prism still through the gateway: submit → poll → ingest
+ * the finished image. Same poll-tolerance and deadline semantics as video;
+ * a still that succeeds without an image_url is a contract violation and
+ * fails honestly.
+ */
+async function renderStillSelfHosted(
+  input: HostedImageInput,
+  opts?: HostedRenderOptions
+): Promise<HostedImageResult> {
+  const { intervalMs, timeoutMs } = timings(POLL_INTERVAL_MS, POLL_TIMEOUT_MS)
+
+  await opts?.onProgress?.(6)
+  const submission = await submitImageJob(input)
+  await opts?.onProgress?.(PROGRESS_FLOOR)
+
+  const deadline = Date.now() + timeoutMs
+  let progress = PROGRESS_FLOOR
+  let pollFailures = 0
+  while (Date.now() < deadline) {
+    await sleep(intervalMs)
+    let status: GatewayImageJobStatus
+    try {
+      status = await pollImageJob(submission.id)
+      pollFailures = 0
+    } catch (error) {
+      pollFailures += 1
+      if (pollFailures > POLL_FAILURE_TOLERANCE) throw error
+      continue
+    }
+
+    if (status.status === 'queued') continue
+
+    if (status.status === 'running') {
+      const remote =
+        typeof status.progress === 'number' && Number.isFinite(status.progress)
+          ? Math.max(0, Math.min(100, status.progress))
+          : null
+      progress =
+        remote !== null
+          ? Math.max(progress, Math.min(PROGRESS_CEILING, remote))
+          : Math.min(PROGRESS_CEILING, progress + 6)
+      await opts?.onProgress?.(progress)
+      continue
+    }
+
+    if (status.status === 'failed') {
+      throw new Error(status.error || 'self-hosted still render failed')
+    }
+
+    if (!status.image_url) {
+      throw new Error('self-hosted still render succeeded without an image_url')
+    }
+    const imagePath = await ingestAsset(
+      status.image_url,
+      `/generated/${input.jobId}-still.png`,
+      'frame'
+    )
+    await opts?.onProgress?.(92)
+    return { imagePath }
+  }
+  throw new Error('self-hosted still render timed out')
+}
+
 export const selfHostedProvider: HostedVideoProvider = {
   name: 'selfhosted',
   get configured() {
     return isSelfHostedConfigured()
   },
   render: renderSelfHosted,
+  imageCapable: true,
+  renderStill: renderStillSelfHosted,
 }

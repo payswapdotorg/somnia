@@ -175,6 +175,8 @@ export interface ProviderHealthSummaryView {
   llmConfigured: boolean
   llmModel: string | null
   modelRoutes: Record<string, string>
+  /** T16 — which tier serves prism stills ('demo' = local path). */
+  imageModelRoutes: Record<string, string>
 }
 
 /** Agent run view returned by the /api/agents routes. */

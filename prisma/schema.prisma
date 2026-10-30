@@ -193,3 +193,20 @@ model AgentRun {
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
+
+// T16 — live-tier durability: the self-hosted gateway endpoint lives in the
+// DATABASE, not the env. SELFHOSTED_URL points at the app's own stable relay
+// route (/api/tier/relay/*); the relay forwards to the URL held here. A
+// sandbox rotation is therefore UPDATE one row (via the ops route) — zero
+// Vercel env rewrites, zero redeploys, and in-flight polls switch to the new
+// sandbox on their next read. Singleton by convention: id is always
+// 'singleton' (upserted, never duplicated).
+model TierGateway {
+  id        String   @id // always 'singleton'
+  url       String // live gateway base URL (https://3000-<id>.e2b.app)
+  apiKey    String? // per-sandbox gateway bearer (null = unauthenticated gateway)
+  model     String? // display model id for health (e.g. e2b-kenburns-cpu)
+  sandboxId String? // provenance — the E2B sandbox behind the URL
+  notes     String? // operator notes (rotation reason, cost reminders)
+  updatedAt DateTime @updatedAt
+}

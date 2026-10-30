@@ -124,6 +124,7 @@ export function CreateApp({ user, prefill, onCreditsChanged }: CreateAppProps) {
             llmConfigured: !!body.llmConfigured,
             llmModel: body.llmModel ?? null,
             modelRoutes: body.modelRoutes ?? {},
+            imageModelRoutes: body.imageModelRoutes ?? {},
           })
         }
       } catch {

@@ -2,9 +2,10 @@ import { spawn } from 'node:child_process'
 import { resolveFfmpegBin } from '@/lib/runtime'
 import { resolveVideoProvider } from '@/lib/providers'
 import { isBlobConfigured } from '@/lib/blob'
-import { effectiveRoutes } from '@/lib/routing'
+import { effectiveRoutes, effectiveImageRoutes } from '@/lib/routing'
 import { hostedLlmConfig } from '@/lib/llm'
 import { imageSdkProbe } from '@/lib/pipeline'
+import { tierGatewayHealth } from '@/lib/tier-gateway'
 
 import { db } from '@/lib/db'
 
@@ -32,6 +33,20 @@ export interface ProviderHealthDto {
   imageSdkAvailable: boolean
   /** Effective per-model routing (T12): which tier serves each video model right now. */
   modelRoutes: Record<string, string>
+  /** Effective image-model routing (T16): which tier serves prism stills right now. */
+  imageModelRoutes: Record<string, string>
+  /**
+   * T16 live-tier durability — the gateway endpoint registered in the
+   * TierGateway DB row. `SELFHOSTED_URL` points at the stable relay; these
+   * three fields say whether a live sandbox is actually behind it (a row
+   * can exist while its sandbox is dead — the hourly E2B cap). Booleans +
+   * an ISO timestamp only; the URL and key are never exposed.
+   */
+  tierGatewayConfigured: boolean
+  /** Liveness probe of the registered endpoint; null when nothing is registered. */
+  tierGatewayAlive: boolean | null
+  /** Last rotation (row updatedAt), ISO string; null when nothing is registered. */
+  tierGatewayRotatedAt: string | null
   ffmpegAvailable: boolean
   /** Parsed from `ffmpeg -version` (first line); null when unavailable. */
   ffmpegVersion: string | null
@@ -132,6 +147,7 @@ export async function getProviderHealth(): Promise<ProviderHealthDto> {
 
   const llm = hostedLlmConfig()
   const imageSdk = await imageSdkProbe()
+  const tierGateway = await tierGatewayHealth()
 
   return {
     // The render pipeline resolves the hosted tier on every job (dynamic env
@@ -147,6 +163,10 @@ export async function getProviderHealth(): Promise<ProviderHealthDto> {
     llmModel: llm ? llm.model : null,
     imageSdkAvailable: imageSdk,
     modelRoutes: effectiveRoutes(),
+    imageModelRoutes: effectiveImageRoutes(),
+    tierGatewayConfigured: tierGateway.configured,
+    tierGatewayAlive: tierGateway.alive,
+    tierGatewayRotatedAt: tierGateway.rotatedAt,
     ffmpegAvailable: ffmpeg.available,
     ffmpegVersion: ffmpeg.version,
     lastJobAt: lastJob?.updatedAt.toISOString() ?? null,

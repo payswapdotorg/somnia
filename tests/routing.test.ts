@@ -27,8 +27,11 @@ import { VIDEO_MODELS } from '@/lib/plans'
 import {
   modelRoutes,
   configuredChain,
+  configuredImageChain,
   failoverOrder,
+  failoverImageOrder,
   effectiveRoutes,
+  effectiveImageRoutes,
   resolveVideoProviderForJob,
 } from '@/lib/routing'
 import { selfHostedProvider, falProvider } from '@/lib/providers'
@@ -249,6 +252,45 @@ describe('routing — effectiveRoutes', () => {
       'pulse-3': 'selfhosted',
       'pulse-flash': 'selfhosted', // pinned to unconfigured fal → chain fallback
     })
+  })
+})
+
+describe('routing — T16 image chain (prism stills)', () => {
+  it('lists only image-capable tiers in cost-control order', () => {
+    expect(failoverImageOrder()).toEqual([]) // nothing configured
+
+    process.env.FAL_KEY = 'test-fal-key'
+    expect(configuredChain()).toHaveLength(1) // fal IS configured…
+    expect(configuredImageChain()).toEqual([]) // …but cannot render stills
+    expect(failoverImageOrder()).toEqual([])
+
+    process.env.SELFHOSTED_URL = 'http://gpu.example'
+    expect(configuredImageChain()).toEqual([selfHostedProvider]) // selfhosted first
+  })
+
+  it('honors a prism route pin only when the tier is image-capable', () => {
+    process.env.SELFHOSTED_URL = 'http://gpu.example'
+    process.env.FAL_KEY = 'test-fal-key'
+    process.env.SOMNIA_MODEL_ROUTES = '{"prism":"fal"}'
+    // pinned to fal (not image-capable) → image chain fallback: selfhosted
+    expect(failoverImageOrder()).toEqual([selfHostedProvider])
+
+    delete process.env.SELFHOSTED_URL
+    // only fal configured — the pin cannot serve stills, chain empty → local
+    expect(failoverImageOrder()).toEqual([])
+  })
+
+  it('maps prism to its effective tier through effectiveImageRoutes', () => {
+    expect(effectiveImageRoutes()).toEqual({ prism: 'demo' })
+
+    process.env.SELFHOSTED_URL = 'http://gpu.example'
+    expect(effectiveImageRoutes()).toEqual({ prism: 'selfhosted' })
+  })
+
+  it('surfaces the image routes through the health DTO', async () => {
+    process.env.SELFHOSTED_URL = 'http://gpu.example'
+    const health = await getProviderHealth()
+    expect(health.imageModelRoutes).toEqual({ prism: 'selfhosted' })
   })
 })
 

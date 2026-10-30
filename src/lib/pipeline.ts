@@ -35,8 +35,9 @@ import { markJobCompleted, markJobFailed } from '@/lib/engine'
 import { providerCostUsd } from '@/lib/economics'
 import { framePath, writeBuffer } from '@/lib/frames'
 import { renderVideo } from '@/lib/video'
-import { failoverOrder } from '@/lib/routing'
+import { failoverOrder, failoverImageOrder } from '@/lib/routing'
 import type { HostedRenderResult, HostedVideoProvider } from '@/lib/providers'
+import type { HostedImageResult } from '@/lib/providers/types'
 import type { Job } from '@prisma/client'
 
 // ---------------------------------------------------------------- frame source
@@ -221,8 +222,12 @@ export async function processJob(jobId: string, opts: ProcessOptions = {}): Prom
   // T12 — multi-model routing: the render order for this job's model (the
   // pinned route first, then the remaining configured tiers as failover
   // candidates). An explicit opts.provider pins exactly one tier; null
-  // forces the local composite path. Hosted tiers render VIDEO jobs only —
-  // prism stills always stay local.
+  // forces the local composite path. T16 — IMAGE jobs route through the
+  // image-capable hosted tiers the same way (prism stills render through
+  // the gateway when one is configured; the local prism path is the
+  // no-hosted-tier fallback, exactly the pre-T16 behavior).
+  const imageCapable = (provider: HostedVideoProvider): boolean =>
+    provider.imageCapable === true && typeof provider.renderStill === 'function'
   const chain: HostedVideoProvider[] =
     job.kind === 'video'
       ? opts.provider !== undefined
@@ -230,7 +235,11 @@ export async function processJob(jobId: string, opts: ProcessOptions = {}): Prom
           ? [opts.provider]
           : []
         : failoverOrder(job.model)
-      : []
+      : opts.provider !== undefined
+        ? opts.provider && imageCapable(opts.provider)
+          ? [opts.provider]
+          : []
+        : failoverImageOrder()
 
   // T7 — provider economics: stamp what this render costs the operator at
   // dispatch time. Demo/local compositing is free; hosted tiers look up the
@@ -258,7 +267,76 @@ export async function processJob(jobId: string, opts: ProcessOptions = {}): Prom
   })
 
   try {
-    if (job.kind === 'image') {
+    if (job.kind === 'image' && chain.length > 0) {
+      // ---- T16 hosted still tiers: try each in failover order ----
+      // Same contract as video: a routed still that fails on every hosted
+      // tier fails and refunds — it NEVER silently degrades to the local
+      // placeholder path (which would hand simulated art to a paid render).
+      const pinnedTimeline = await db.keyframe.findMany({
+        where: { jobId: job.id },
+        orderBy: { order: 'asc' },
+      })
+      let result: HostedImageResult | null = null
+      let renderedBy: HostedVideoProvider | null = null
+      let lastError: unknown = null
+      for (const provider of chain) {
+        try {
+          result = await provider.renderStill!(
+            {
+              jobId: job.id,
+              prompt: job.prompt,
+              model: job.model,
+              resolution: job.resolution,
+              aspectRatio: job.aspectRatio,
+              startFramePath: job.startFramePath,
+              keyframes: pinnedTimeline.map((k) => k.path),
+            },
+            {
+              onProgress: async (pct) => {
+                await db.job
+                  .update({
+                    where: { id: job.id },
+                    data: { progress: Math.max(0, Math.min(99, pct)) },
+                  })
+                  .catch(() => undefined)
+              },
+            }
+          )
+          renderedBy = provider
+          break
+        } catch (error) {
+          lastError = error
+          console.warn(
+            `[pipeline] still provider ${provider.name} failed for job ${job.id}:`,
+            (error as Error)?.message ?? error
+          )
+        }
+      }
+      if (!result || !renderedBy) {
+        // every configured image tier failed — fail and refund
+        throw lastError instanceof Error ? lastError : new Error(String(lastError))
+      }
+      if (renderedBy.name !== providerName) {
+        await db.job
+          .update({
+            where: { id: job.id },
+            data: {
+              providerCostUsd: providerCostUsd({ provider: renderedBy.name, ...costInput }),
+            },
+          })
+          .catch(() => undefined)
+        await db.generation
+          .update({ where: { id: generation.id }, data: { provider: renderedBy.name } })
+          .catch(() => undefined)
+      }
+      // A hosted still is REAL imagery by definition — placeholderRender
+      // stays false (the "simulated render" chip never appears).
+      await markJobCompleted(job.id, { imagePath: result.imagePath })
+      await db.generation.update({
+        where: { id: generation.id },
+        data: { status: 'succeeded', imagePath: result.imagePath },
+      })
+    } else if (job.kind === 'image') {
       const buffer = await source.generate(job.prompt, 'still image', job.aspectRatio)
       // T14 render truth — null from the source means the placeholder ran
       const usedPlaceholder = buffer === null

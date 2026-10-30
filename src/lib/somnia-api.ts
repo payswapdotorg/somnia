@@ -48,6 +48,12 @@
 //   GET    insights                → the caller's margin lens (auth, T7)
 //   GET    media/*                 → Range-aware media streaming
 //   GET    providers/health        → provider health snapshot
+//   ANY    tier/relay/{v1|healthz}/… → T16 live-tier relay — forwards to the
+//                                    gateway URL held in the TierGateway DB
+//                                    row (auth: SELFHOSTED_API_KEY bearer)
+//   GET    ops/gateway             → T16 masked tier-gateway state (ops key)
+//   POST   ops/gateway             → upsert the row (sandbox rotation)
+//   DELETE ops/gateway             → clear the row (tier down)
 
 import { db } from '@/lib/db'
 import { processJob, sweepStaleQueuedJobs } from '@/lib/pipeline'
@@ -90,6 +96,12 @@ import { getInsights as getInsightsSnapshot } from '@/lib/insights'
 import { PLANS } from '@/lib/plans'
 import { serveMedia } from '@/lib/media-handler'
 import { getProviderHealth } from '@/lib/health'
+import {
+  relayGatewayRequest,
+  getOpsGateway,
+  postOpsGateway,
+  deleteOpsGateway,
+} from '@/lib/tier-gateway'
 import { randomBytes } from 'node:crypto'
 import type { User } from '@prisma/client'
 
@@ -608,6 +620,30 @@ export async function dispatchSomnia(request: Request, segments: string[]): Prom
     } catch (error) {
       return toErrorResponse(error)
     }
+  }
+
+  // -------------------------------------------------- T16 live-tier surfaces
+
+  // The relay is SELF-authenticated (gateway bearer), never user-session
+  // auth: the render pipeline's adapter calls it server-to-server with the
+  // stable SELFHOSTED_API_KEY while the live endpoint rotates in the DB.
+  if (first === 'tier' && second === 'relay') {
+    const relayPath = segments.slice(2)
+    if (relayPath.length === 0) return notFound()
+    try {
+      return await relayGatewayRequest(request, relayPath)
+    } catch (error) {
+      return toErrorResponse(error)
+    }
+  }
+
+  // The ops surface is guarded by TIER_OPS_KEY (its own bearer) — the
+  // rotator upserts the singleton row here; no Vercel env, no redeploys.
+  if (first === 'ops' && second === 'gateway' && !third) {
+    if (method === 'GET') return getOpsGateway(request)
+    if (method === 'POST') return postOpsGateway(request)
+    if (method === 'DELETE') return deleteOpsGateway(request)
+    return notFound()
   }
 
   // ------------------------------------------------------- authenticated

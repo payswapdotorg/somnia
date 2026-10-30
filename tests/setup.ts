@@ -64,6 +64,7 @@ const TABLES = [
   'Like',
   'ApiKey',
   'AgentRun',
+  'TierGateway',
 ]
 const { PrismaClient } = await import('@prisma/client')
 const prisma = new PrismaClient({ log: ['error'] })

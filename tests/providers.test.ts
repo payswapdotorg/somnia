@@ -62,6 +62,8 @@ class FakeGateway {
   observedProgress: number[] = []
   watchJobId: string | null = null
   pollScript: Array<Record<string, unknown>> = []
+  /** T16 — image-job poll script (consumed one response per status poll). */
+  imagePollScript: Array<Record<string, unknown>> = []
   submitStatus = 202
   /** Leading submits to reject with 503 before accepting (transient-hiccup sim). */
   submitFailures = 0
@@ -92,6 +94,11 @@ class FakeGateway {
       res.end(this.clip)
       return
     }
+    if (url === '/still.png') {
+      res.writeHead(200, { 'content-type': 'image/png', 'content-length': String(this.frame.length) })
+      res.end(this.frame)
+      return
+    }
     if (url === '/f1.png' || url === '/f2.png') {
       res.writeHead(200, { 'content-type': 'image/png', 'content-length': String(this.frame.length) })
       res.end(this.frame)
@@ -100,8 +107,10 @@ class FakeGateway {
 
     // ---- submit endpoints ----
     const isSelfSubmit = this.mode === 'selfhosted' && method === 'POST' && url === '/v1/video/jobs'
+    const isSelfImageSubmit =
+      this.mode === 'selfhosted' && method === 'POST' && url === '/v1/image/jobs'
     const isFalSubmit = this.mode === 'fal' && method === 'POST' // POST {base}/{model} — model ids contain slashes
-    if (isSelfSubmit || isFalSubmit) {
+    if (isSelfSubmit || isSelfImageSubmit || isFalSubmit) {
       const chunks: Buffer[] = []
       for await (const chunk of req) chunks.push(chunk as Buffer)
       const body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as Record<string, unknown>
@@ -122,11 +131,33 @@ class FakeGateway {
         return
       }
       res.writeHead(202, { 'content-type': 'application/json' })
-      res.end(JSON.stringify(this.mode === 'fal' ? { request_id: 'fal-req-1' } : { id: 'gw-1' }))
+      res.end(
+        JSON.stringify(
+          this.mode === 'fal'
+            ? { request_id: 'fal-req-1' }
+            : isSelfImageSubmit
+              ? { id: 'gw-img-1' }
+              : { id: 'gw-1' }
+        )
+      )
       return
     }
 
     // ---- status polls ----
+    if (this.mode === 'selfhosted' && method === 'GET' && url === '/v1/image/jobs/gw-img-1') {
+      this.polls.push(url)
+      if (this.pollFailures > 0) {
+        this.pollFailures -= 1
+        res.writeHead(500, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ error: 'edge hiccup' }))
+        return
+      }
+      const next =
+        this.imagePollScript.shift() ?? { status: 'succeeded', image_url: `${this.url}/still.png` }
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify(next))
+      return
+    }
     if (this.mode === 'selfhosted' && method === 'GET' && url === '/v1/video/jobs/gw-1') {
       this.polls.push(url)
       if (this.pollFailures > 0) {
@@ -576,9 +607,11 @@ describe('providers — fal queue adapter', () => {
 // ---------------------------------------------------------------- pipeline split
 
 describe('providers — pipeline routing', () => {
-  it('keeps image jobs on the local prism path even with a provider configured', async () => {
-    const gw = await new FakeGateway('selfhosted').start()
-    process.env.SELFHOSTED_URL = gw.url
+  it('keeps image jobs local when the hosted tier is VIDEO-only (T16: injected provider)', async () => {
+    // T16 flipped the T6a contract: an image-capable hosted tier now serves
+    // prism stills. This spec pins the remaining local case — an explicitly
+    // injected provider that cannot render stills (the fal shape) keeps the
+    // local prism path, exactly what a video-only tier must do.
     try {
       const user = await newUser()
       const job = await createJob({
@@ -588,10 +621,13 @@ describe('providers — pipeline routing', () => {
       })
       const { source, calls } = fakeFrameSource()
 
-      const done = await processJob(job.id, { frameSource: source })
+      const done = await processJob(job.id, {
+        frameSource: source,
+        provider: falProvider,
+      })
       expect(done.status).toBe('completed')
       expect(calls).toHaveLength(1) // prism stills stay local
-      expect(gw.submits).toHaveLength(0) // never touched the gateway
+      expect(done.placeholderRender).toBe(false)
 
       const generation = await db.generation.findFirst({ where: { jobId: job.id } })
       expect(generation?.provider).toBe('demo')
@@ -600,7 +636,7 @@ describe('providers — pipeline routing', () => {
       })
       expect(poster).toBeTruthy()
     } finally {
-      await gw.close()
+      // nothing to close — no gateway involved on the local path
     }
   })
 
@@ -640,5 +676,128 @@ describe('providers — pipeline routing', () => {
     } finally {
       await gw.close()
     }
+  })
+
+  // ------------------------------------------------ T16 prism stills through the gateway
+  // IMAGE jobs now route through the image-capable hosted tiers — the last
+  // placeholder surface is gone. Same honesty contract as video: a hosted
+  // still is REAL imagery (never placeholder-flagged), and a routed still
+  // that fails on every hosted tier fails and refunds — it never silently
+  // degrades to local placeholder art.
+
+  it('renders prism stills through the gateway (no placeholder flag, real cost stamp)', async () => {
+    const gw = await new FakeGateway('selfhosted').start()
+    process.env.SELFHOSTED_URL = gw.url
+    try {
+      const user = await newUser()
+      const job = await createJob({
+        userId: user.id,
+        prompt: 'a single striking still',
+        kind: 'image',
+        model: 'prism',
+      })
+      const { source, calls } = fakeFrameSource()
+
+      const done = await processJob(job.id, { frameSource: source })
+      expect(done.status).toBe('completed')
+      expect(done.placeholderRender).toBe(false) // hosted imagery is real
+      expect(done.providerCostUsd).toBe(0.004) // selfhosted prism still estimate
+      expect(calls).toHaveLength(0) // the local image SDK never runs
+
+      const generation = await db.generation.findFirst({ where: { jobId: job.id } })
+      expect(generation?.provider).toBe('selfhosted')
+      expect(generation?.imagePath).toBeTruthy()
+
+      // the still landed as the job's poster asset
+      const poster = await db.asset.findFirst({
+        where: { jobId: job.id, kind: 'poster', variantKey: 'main' },
+      })
+      expect(poster?.path).toBeTruthy()
+      const bytes = await fileBytes(poster!.path)
+      expect(bytes?.equals(FRAME)).toBe(true) // the gateway's actual pixels
+
+      // the submission carried the still contract (no duration/hdr/loop)
+      const submit = gw.submits[0]
+      expect(submit!.url).toBe('/v1/image/jobs')
+      expect(submit!.body.resolution).toBe('720p')
+      expect(submit!.body.aspect_ratio).toBe('16:9')
+      expect(submit!.body.duration_sec).toBeUndefined()
+      expect(submit!.body.keyframes).toEqual([])
+    } finally {
+      await gw.close()
+    }
+  })
+
+  it('passes the pinned source frame through for image-to-image stills', async () => {
+    const gw = await new FakeGateway('selfhosted').start()
+    process.env.SELFHOSTED_URL = gw.url
+    try {
+      const user = await newUser()
+      const job = await createJob({
+        userId: user.id,
+        prompt: 'reimagine this exact frame',
+        kind: 'image',
+        keyframes: [{ dataUrl: PNG_1PX, name: 'source.png' }],
+      })
+
+      const done = await processJob(job.id)
+      expect(done.status).toBe('completed')
+
+      const body = gw.submits[0]?.body
+      expect(body!.start_frame).toBe(job.startFramePath)
+      expect(body!.keyframes).toEqual([job.startFramePath])
+    } finally {
+      await gw.close()
+    }
+  })
+
+  it('fails and refunds when the hosted still fails (never local placeholder art)', async () => {
+    const gw = await new FakeGateway('selfhosted').start()
+    process.env.SELFHOSTED_URL = gw.url
+    gw.imagePollScript = [{ status: 'failed', error: 'imagery generation failed upstream' }]
+    try {
+      const user = await newUser()
+      const before = await balance(user.id)
+      const job = await createJob({
+        userId: user.id,
+        prompt: 'a still that cannot be produced',
+        kind: 'image',
+      })
+      const { source, calls } = fakeFrameSource()
+
+      const done = await processJob(job.id, { frameSource: source })
+      expect(done.status).toBe('failed')
+      expect(done.errorMessage).toContain('imagery generation failed upstream')
+      expect(done.placeholderRender).toBe(false) // failed, not simulated
+      expect(await balance(user.id)).toBe(before) // refunded in full
+      expect(calls).toHaveLength(0) // NEVER fell back to the local path
+
+      const poster = await db.asset.findFirst({
+        where: { jobId: job.id, kind: 'poster', variantKey: 'main' },
+      })
+      expect(poster).toBeNull()
+    } finally {
+      await gw.close()
+    }
+  })
+
+  it('keeps the local prism path when no hosted image tier is configured', async () => {
+    // no SELFHOSTED_URL — the pre-T16 behavior, byte-for-byte
+    const user = await newUser()
+    const job = await createJob({
+      userId: user.id,
+      prompt: 'a local still',
+      kind: 'image',
+    })
+    const { source, calls } = fakeFrameSource()
+
+    const done = await processJob(job.id, { frameSource: source })
+    expect(done.status).toBe('completed')
+    expect(calls).toHaveLength(1) // the local image SDK produced the still
+    expect(done.placeholderRender).toBe(false)
+    expect(done.providerCostUsd).toBe(0) // demo/local compositing is free
+
+    const generation = await db.generation.findFirst({ where: { jobId: job.id } })
+    expect(generation?.provider).toBe('demo')
   })
 })
