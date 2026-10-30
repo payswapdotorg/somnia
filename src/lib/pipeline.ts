@@ -209,13 +209,14 @@ export async function processJob(jobId: string, opts: ProcessOptions = {}): Prom
       const buffer = await source.generate(job.prompt, 'still image', job.aspectRatio)
       const png =
         buffer ?? (await placeholderBuffer(job.prompt, 1, 1, job.aspectRatio))
-      const path = stillPath(job.id)
-      await writeBuffer(path, png)
+      // writeBuffer returns the durable reference (blob URL when a store is
+      // wired) — the database remembers that, not the ephemeral local path
+      const imagePath = await writeBuffer(stillPath(job.id), png)
       await db.job.update({ where: { id: job.id }, data: { progress: 80 } })
-      await markJobCompleted(job.id, { imagePath: path })
+      await markJobCompleted(job.id, { imagePath })
       await db.generation.update({
         where: { id: generation.id },
-        data: { status: 'succeeded', imagePath: path },
+        data: { status: 'succeeded', imagePath },
       })
     } else if (provider) {
       // ---- hosted tier: submit → poll (progress mirrored) → ingest ----
@@ -282,9 +283,8 @@ export async function processJob(jobId: string, opts: ProcessOptions = {}): Prom
           )
           const png =
             buffer ?? (await placeholderBuffer(job.prompt, i, count, job.aspectRatio))
-          const path = framePath(job.id, i)
-          await writeBuffer(path, png)
-          middle.push(path)
+          const durablePath = await writeBuffer(framePath(job.id, i), png)
+          middle.push(durablePath)
         }
         await db.asset.createMany({
           data: middle.map((p) => ({ jobId: job.id, kind: 'frame', path: p })),

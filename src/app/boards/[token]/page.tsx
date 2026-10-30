@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
 import { BRAND } from '@/lib/brand'
+import { absoluteMediaUrl } from '@/lib/blob'
 
 /**
  * Somnia — public, unlisted board share page.
@@ -94,7 +95,8 @@ export async function generateMetadata({
   const description =
     excerpt(payload.board.description ?? payload.board.name, 160) +
     ` · ${payload.jobs.length} shared dreams`
-  const ogImage = payload.coverPath ? `${siteUrl()}${payload.coverPath}` : undefined
+  // blob URLs pass through untouched; /generated paths join onto the site URL
+  const ogImage = absoluteMediaUrl(payload.coverPath, siteUrl())
   return {
     title,
     description,

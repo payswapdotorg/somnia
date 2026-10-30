@@ -2,6 +2,7 @@ import { promises as fs } from 'fs'
 import path from 'path'
 import sharp from 'sharp'
 import { IS_SERVERLESS, absoluteMediaPath, mediaDir } from '@/lib/runtime'
+import { putMedia } from '@/lib/blob'
 
 // Reelforge frame storage. Locally files live under public/generated so they
 // are servable as static assets straight from the browser; on serverless the
@@ -37,15 +38,21 @@ export async function ensureGeneratedDirWritable() {
   await fs.access(GENERATED_DIR, fs.constants.W_OK)
 }
 
-export async function writeBase64Png(publicPath: string, base64: string) {
-  await ensureGeneratedDir()
+export async function writeBase64Png(publicPath: string, base64: string): Promise<string> {
   const buffer = Buffer.from(base64, 'base64')
-  await fs.writeFile(absoluteFromPublic(publicPath), buffer)
+  return writeBuffer(publicPath, buffer)
 }
 
-export async function writeBuffer(publicPath: string, data: Buffer) {
+/**
+ * Write media bytes into local scratch and return the durable reference the
+ * database should remember: the absolute blob URL when a store is wired
+ * (T11), or the public path unchanged otherwise (local/dev parity). The
+ * local copy always exists for the same-invocation fast path.
+ */
+export async function writeBuffer(publicPath: string, data: Buffer): Promise<string> {
   await ensureGeneratedDir()
   await fs.writeFile(absoluteFromPublic(publicPath), data)
+  return putMedia(publicPath, data)
 }
 
 /**

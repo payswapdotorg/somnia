@@ -1,8 +1,56 @@
 # Somnia — repo handoff instructions
 
-> **Current state (T10, durable storage — Neon Postgres):** on top of the T9
-> covers/OG tree, the database is now durable PostgreSQL on Neon. What
-> landed:
+> **Current state (T11, durable media storage — Vercel Blob):** on top of the
+> T10 Neon tree, generated media is now durable too. What landed:
+>
+> 1. **The blob layer** — `src/lib/blob.ts` is the media twin of the Neon
+>    migration. Writes stay local-first (ffmpeg reads and writes real
+>    files) but also upload to the `somnia-media` Vercel Blob store, and
+>    the DATABASE remembers the absolute CDN URL instead of the ephemeral
+>    `/generated/...` scratch path. Without `BLOB_READ_WRITE_TOKEN` every
+>    function is an identity no-op — local dev and the hermetic suite keep
+>    byte-for-byte the pre-blob behavior (the env is read lazily at call
+>    time, same rule as `resolveVideoProvider`).
+> 2. **Write path wired** — `writeBuffer`/`writeBase64Png` (frames.ts)
+>    return the durable URL; `storeFrameDataUrl` (storage.ts) became async
+>    and dual-writes, so pinned timelines and start/end frames are durable
+>    at job-creation time; `renderVideo`/`extractStyledFrames`/
+>    `reframeVideo` (video.ts) mirror their MP4/PNG outputs into the store;
+>    `ingestAsset` returns durable URLs for hosted-tier clips.
+> 3. **Read path wired** — `resolveMediaInput` maps any stored reference to
+>    a local file for ffmpeg: the local fast path when the file is on disk
+>    (the same invocation wrote it), a one-shot download when only the blob
+>    copy exists (cross-instance: extend/edit seeds, reframes), a scratch
+>    download for legacy remote fallback URLs. Share/board OG tags
+>    absolutize via `absoluteMediaUrl` (blob URLs pass through untouched);
+>    players, posters and thumbnails read the CDN URLs directly — native
+>    Range support, zero function invocations per media view.
+> 4. **Store + env** — provisioned via the Vercel REST API
+>    (`scripts/provision-blob.mjs`, outside the repo): store `somnia-media`
+>    (region iad1, **public** access — that is what makes direct CDN URLs
+>    with Range work), connected to the `somnia` project, which
+>    auto-attached `BLOB_READ_WRITE_TOKEN` (encrypted,
+>    production/preview/development) BEFORE the code push, so the deploy
+>    never booted without it. The token value is never needed locally by
+>    design. `GET /api/providers/health` now reports
+>    `blobStorageConfigured` (boolean only).
+>
+> The whole suite is **295 specs green** (17 new in `tests/blob.test.ts`:
+> config detection, key derivation, mirror/resolve fast+slow paths, OG URL
+> passthrough, and pipeline durability — image/video jobs landing blob URLs
+> in Asset/Generation rows with local copies intact). `tsc --noEmit` clean,
+> `eslint .` zero errors (same 11 pre-existing warnings). The suite is
+> network-bound against the Neon test DB — chunk the run (fast units ~3min,
+> engine/pipeline ~5.5min, providers ~4min, api ~5min, UI ~2min).
+> **Next (T12):** multi-model routing across hosted + self-hosted tiers
+> (both adapters exist behind one interface; routing/health/failover policy
+> is the remaining work), plus wiring a real hosted provider key on Vercel.
+
+---
+
+> **Prior state (T10, durable storage — Neon Postgres):** on top of the T9
+> covers/OG tree, the database was migrated to durable PostgreSQL on Neon.
+> What landed:
 >
 > 1. **Provider migration** — `prisma/schema.prisma` switched
 >    `sqlite` → `postgresql` (+ `binaryTargets` native +

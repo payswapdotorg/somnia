@@ -3,6 +3,7 @@ import { promises as fs } from 'fs'
 import os from 'os'
 import path from 'path'
 import { absoluteFromPublic, ensureGeneratedDirWritable, GENERATED_DIR } from '@/lib/frames'
+import { mirrorLocalFile, resolveMediaInput } from '@/lib/blob'
 import { resolveFfmpegBin } from '@/lib/runtime'
 import type { CameraPresetId } from '@/lib/presets'
 import type { AspectRatio, Resolution } from '@/lib/plans'
@@ -215,8 +216,10 @@ export interface RenderVideoOptions {
 }
 
 /**
- * Render the composite clip. Returns the public-relative MP4 path on success,
- * or null when video production had to be skipped (never throws).
+ * Render the composite clip. Returns the durable media reference on
+ * success — the blob URL when a store is wired (T11), else the
+ * public-relative MP4 path — or null when video production had to be
+ * skipped (never throws).
  */
 export async function renderVideo(options: RenderVideoOptions): Promise<string | null> {
   const { jobId, resolution, aspectRatio, durationSec } = options
@@ -249,7 +252,7 @@ export async function renderVideo(options: RenderVideoOptions): Promise<string |
     const segmentFiles: string[] = []
     for (let index = 0; index < count; index++) {
       if (remaining() < 3_000) throw new Error('render budget exhausted before segments finished')
-      const source = absoluteFromPublic(segments[index])
+      const source = await resolveMediaInput(segments[index])
       const segFile = path.join(tmpDir, `seg-${index}.mp4`)
       const args = [
         '-y',
@@ -359,12 +362,13 @@ export async function renderVideo(options: RenderVideoOptions): Promise<string |
       return null
     }
 
-    // 3) Move into place (same-filesystem rename keeps the swap atomic).
+    // 3) Move into place (same-filesystem rename keeps the swap atomic) and
+    // mirror to the blob store — the database remembers the durable URL.
     await fs.rename(partAbs, finalAbs)
     console.log(
       `[video] rendered /generated/${outputName}.mp4 (${count} segments, ${durationSec}s target, ${motion} motion, ${(Date.now() - startedAt) / 1000}s wall)`
     )
-    return `/generated/${outputName}.mp4`
+    return mirrorLocalFile(`/generated/${outputName}.mp4`)
   } catch (error) {
     console.error('[video] render skipped:', (error as Error)?.message ?? error)
     return null
@@ -404,7 +408,7 @@ export async function extractStyledFrames(
   const written: string[] = []
   try {
     await ensureGeneratedDirWritable()
-    const source = absoluteFromPublic(options.sourcePath)
+    const source = await resolveMediaInput(options.sourcePath)
 
     for (let index = 0; index < timestamps.length; index += 1) {
       const stamp = Math.max(0, timestamps[index])
@@ -437,7 +441,7 @@ export async function extractStyledFrames(
       )
       if (run.ok) {
         await fs.rename(partAbs, targetAbs)
-        written.push(targetPublic)
+        written.push(await mirrorLocalFile(targetPublic))
       } else {
         console.error(
           `[video] styled frame ${index + 1} failed${run.timedOut ? ' (timeout)' : ''}: ${run.stderrTail.slice(-300)}`
@@ -482,8 +486,9 @@ export interface ReframeVideoOptions {
 /**
  * Phase 3 reframe: scale + centre-crop an existing MP4 onto the target
  * aspect's resolution-aware canvas, re-encoded H.264 yuv420p faststart 30fps at
- * the resolution CRF. Returns the public-relative MP4 path on success, or null (never
- * throws). Frame count/duration of the source are preserved exactly.
+ * the resolution CRF. Returns the durable media reference on success (blob
+ * URL when a store is wired, else the public-relative MP4 path), or null
+ * (never throws). Frame count/duration of the source are preserved exactly.
  */
 export async function reframeVideo(options: ReframeVideoOptions): Promise<string | null> {
   const { jobId, resolution, targetAspectRatio } = options
@@ -494,7 +499,7 @@ export async function reframeVideo(options: ReframeVideoOptions): Promise<string
   let partAbs: string | null = null
   try {
     await ensureGeneratedDirWritable()
-    const source = absoluteFromPublic(options.sourcePath)
+    const source = await resolveMediaInput(options.sourcePath)
     const finalPublic = reframeVariantPath(jobId, targetAspectRatio)
     const finalAbs = absoluteFromPublic(finalPublic)
     partAbs = `${finalAbs}.part`
@@ -539,7 +544,7 @@ export async function reframeVideo(options: ReframeVideoOptions): Promise<string
     console.log(
       `[video] reframed ${finalPublic} (${canvas.w}x${canvas.h}, ${(Date.now() - startedAt) / 1000}s wall)`
     )
-    return finalPublic
+    return mirrorLocalFile(finalPublic)
   } catch (error) {
     console.error('[video] reframe skipped:', (error as Error)?.message ?? error)
     return null

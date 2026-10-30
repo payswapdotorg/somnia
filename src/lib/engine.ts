@@ -119,13 +119,13 @@ export async function createJob(input: CreateJobInput): Promise<Job> {
   // ------------------------------------------------------- persist frames
   let startFramePath = input.startFramePath ?? null
   let endFramePath = input.endFramePath ?? null
-  const explicitStart = input.startFrame ? storeFrameDataUrl(input.startFrame) : null
-  const explicitEnd = input.endFrame ? storeFrameDataUrl(input.endFrame) : null
+  const explicitStart = input.startFrame ? await storeFrameDataUrl(input.startFrame) : null
+  const explicitEnd = input.endFrame ? await storeFrameDataUrl(input.endFrame) : null
   if (explicitStart) startFramePath = explicitStart
   if (explicitEnd) endFramePath = explicitEnd
 
   const keyframePaths: string[] = []
-  for (const kf of keyframeList) keyframePaths.push(storeFrameDataUrl(kf.dataUrl))
+  for (const kf of keyframeList) keyframePaths.push(await storeFrameDataUrl(kf.dataUrl))
   if (keyframePaths.length > 0) {
     startFramePath = keyframePaths[0]
     endFramePath = keyframePaths[keyframePaths.length - 1]

@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process'
 import { resolveFfmpegBin } from '@/lib/runtime'
 import { resolveVideoProvider } from '@/lib/providers'
+import { isBlobConfigured } from '@/lib/blob'
 
 import { db } from '@/lib/db'
 
@@ -14,6 +15,8 @@ export interface ProviderHealthDto {
   selfHostedConfigured: boolean
   /** Display string for the configured self-hosted model id (or null). */
   selfHostedModel: string | null
+  /** Blob store wired (BLOB_READ_WRITE_TOKEN)? Boolean only — durable media vs per-instance scratch. */
+  blobStorageConfigured: boolean
   ffmpegAvailable: boolean
   /** Parsed from `ffmpeg -version` (first line); null when unavailable. */
   ffmpegVersion: string | null
@@ -121,6 +124,7 @@ export async function getProviderHealth(): Promise<ProviderHealthDto> {
     selfHostedModel: process.env.SELFHOSTED_URL
       ? (process.env.SELFHOSTED_MODEL ?? 'wan2.2-t2v-5b')
       : null,
+    blobStorageConfigured: isBlobConfigured(),
     ffmpegAvailable: ffmpeg.available,
     ffmpegVersion: ffmpeg.version,
     lastJobAt: lastJob?.updatedAt.toISOString() ?? null,

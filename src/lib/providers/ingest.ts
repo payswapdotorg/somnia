@@ -50,8 +50,9 @@ export async function ingestAsset(
     const buffer = Buffer.from(await response.arrayBuffer())
     if (buffer.byteLength === 0 || buffer.byteLength > MAX_DOWNLOAD_BYTES) return remoteUrl
     const resolved = publicPath.replace(/\.[a-z0-9]+$/i, `.${extensionOf(remoteUrl, kind)}`)
-    await writeBuffer(resolved, buffer)
-    return resolved
+    // writeBuffer mirrors into the blob store when one is wired and returns
+    // the durable URL — hosted-tier clips stay playable across instances
+    return writeBuffer(resolved, buffer)
   } catch {
     return remoteUrl
   }
