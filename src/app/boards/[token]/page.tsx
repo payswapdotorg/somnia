@@ -21,6 +21,8 @@ interface SharedBoardPayload {
     description: string | null
     sharedAt: string | null
   }
+  /** Newest dream's still — the board's OG image. */
+  coverPath: string | null
   jobs: Array<{
     id: string
     prompt: string
@@ -30,6 +32,8 @@ interface SharedBoardPayload {
     loop: boolean
     createdAt: string
     videoPath: string | null
+    /** The dream's still — the video poster. */
+    posterPath: string | null
   }>
 }
 
@@ -90,7 +94,23 @@ export async function generateMetadata({
   const description =
     excerpt(payload.board.description ?? payload.board.name, 160) +
     ` · ${payload.jobs.length} shared dreams`
-  return { title, description, robots: NOINDEX }
+  const ogImage = payload.coverPath ? `${siteUrl()}${payload.coverPath}` : undefined
+  return {
+    title,
+    description,
+    robots: NOINDEX,
+    metadataBase: new URL(siteUrl()),
+    openGraph: {
+      title,
+      description,
+      type: 'website',
+      siteName: BRAND.name,
+      ...(ogImage ? { images: [{ url: ogImage }] } : {}),
+    },
+    twitter: ogImage
+      ? { card: 'summary_large_image', title, description, images: [ogImage] }
+      : { card: 'summary', title, description },
+  }
 }
 
 function BoardUnavailable(): React.ReactElement {
@@ -180,6 +200,7 @@ export default async function SharedBoardPage({
                 {job.videoPath ? (
                   <video
                     src={job.videoPath}
+                    poster={job.posterPath ?? undefined}
                     controls
                     muted
                     loop={job.loop}

@@ -13,10 +13,27 @@ export interface BoardSummary {
   description: string | null
   shareToken: string | null
   jobCount: number
+  /** Newest completed dream's still — poster, else middle keyframe. */
+  coverPath: string | null
 }
 
 function newToken(): string {
   return randomBytes(16).toString('hex')
+}
+
+/**
+ * A dream's still: its poster asset when one exists (image dreams), else
+ * the middle keyframe of the pinned timeline (video dreams — the most
+ * representative frame). Nothing completed renders no still, ever a fake.
+ */
+function stillFor(job: {
+  assets: { kind: string; path: string }[]
+  keyframes: { order: number; path: string }[]
+}): string | null {
+  const poster = job.assets.find((a) => a.kind === 'poster')?.path
+  if (poster) return poster
+  const ordered = [...job.keyframes].sort((a, b) => a.order - b.order)
+  return ordered.length > 0 ? ordered[Math.floor((ordered.length - 1) / 2)].path : null
 }
 
 // ------------------------------------------------------------------- boards
@@ -33,24 +50,45 @@ export async function createBoard(
 }
 
 export async function listBoards(userId: string): Promise<BoardSummary[]> {
-  const boards = await db.board.findMany({
-    where: { userId },
-    orderBy: { createdAt: 'asc' },
-  })
-  const counts = await db.job.groupBy({
-    by: ['boardId'],
-    where: { userId },
-    _count: { _all: true },
-  })
+  const [boards, counts, completed] = await Promise.all([
+    db.board.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'asc' },
+    }),
+    db.job.groupBy({
+      by: ['boardId'],
+      where: { userId },
+      _count: { _all: true },
+    }),
+    // the caller's completed, still-filed dreams, newest first — one walk
+    // builds every board cover (first job with a still wins per board)
+    db.job.findMany({
+      where: { userId, boardId: { not: null }, status: 'completed' },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        boardId: true,
+        assets: { where: { kind: 'poster' }, select: { kind: true, path: true } },
+        keyframes: { select: { order: true, path: true } },
+      },
+    }),
+  ])
   const countMap = new Map(
     counts.map((c) => [c.boardId ?? '', c._count._all] as const)
   )
+  const coverMap = new Map<string, string>()
+  for (const job of completed) {
+    const boardId = job.boardId
+    if (!boardId || coverMap.has(boardId)) continue
+    const still = stillFor(job)
+    if (still) coverMap.set(boardId, still)
+  }
   return boards.map((b) => ({
     id: b.id,
     name: b.name,
     description: b.description,
     shareToken: b.shareToken,
     jobCount: countMap.get(b.id) ?? 0,
+    coverPath: coverMap.get(b.id) ?? null,
   }))
 }
 
@@ -80,8 +118,20 @@ export async function getSharedBoard(token: string) {
   const jobs = await db.job.findMany({
     where: { boardId: board.id, status: 'completed' },
     orderBy: { createdAt: 'desc' },
-    include: { assets: true },
+    include: { assets: true, keyframes: true },
   })
+  const mapped = jobs.map((j) => ({
+    id: j.id,
+    prompt: j.prompt,
+    model: j.model,
+    resolution: j.resolution,
+    aspectRatio: j.aspectRatio,
+    loop: j.loop,
+    createdAt: j.createdAt,
+    videoPath:
+      j.assets.find((a) => a.kind === 'video' && a.variantKey === 'main')?.path ?? null,
+    posterPath: stillFor(j),
+  }))
   return {
     board: {
       id: board.id,
@@ -89,17 +139,9 @@ export async function getSharedBoard(token: string) {
       description: board.description,
       sharedAt: board.sharedAt,
     },
-    jobs: jobs.map((j) => ({
-      id: j.id,
-      prompt: j.prompt,
-      model: j.model,
-      resolution: j.resolution,
-      aspectRatio: j.aspectRatio,
-      loop: j.loop,
-      createdAt: j.createdAt,
-      videoPath:
-        j.assets.find((a) => a.kind === 'video' && a.variantKey === 'main')?.path ?? null,
-    })),
+    /** Newest dream's still — the board's OG image. */
+    coverPath: mapped[0]?.posterPath ?? null,
+    jobs: mapped,
   }
 }
 
@@ -135,6 +177,7 @@ export async function getSharedJob(token: string) {
     include: {
       user: { select: { name: true, avatarSeed: true } },
       assets: true,
+      keyframes: true,
     },
   })
   if (!job) return null
@@ -155,6 +198,8 @@ export async function getSharedJob(token: string) {
     likeCount,
     videoPath:
       job.assets.find((a) => a.kind === 'video' && a.variantKey === 'main')?.path ?? null,
+    /** The dream's still — its OG image and the video poster. */
+    posterPath: stillFor(job),
   }
 }
 

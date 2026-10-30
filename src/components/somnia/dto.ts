@@ -90,6 +90,8 @@ export interface BoardView {
   description: string | null
   shareToken: string | null
   jobCount: number
+  /** Newest completed dream's still — poster, else middle keyframe. */
+  coverPath: string | null
 }
 
 export interface KeyView {

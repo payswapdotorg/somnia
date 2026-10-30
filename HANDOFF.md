@@ -1,30 +1,36 @@
 # Somnia — repo handoff instructions
 
-> **Current state (T8, the Insights / usage surface):** on top of the T7
-> margin-lens backend, the lens now has its UI. What landed:
+> **Current state (T9, board cover stills + OG imagery):** on top of the
+> T8 Insights surface, every card that represents a dream or a board now
+> carries a real image, and every public page ships honest OG imagery.
+> What landed:
 >
-> 1. **`/insights` (the surface)** — `src/components/somnia/insights-app.tsx`
->    + `InsightsScreen` + a top-nav entry. One `GET /api/insights` on mount
->    (a usage dashboard does not poll) plus a manual Refresh; skeleton
->    first-load; load error with Retry; a failed refresh keeps the stale
->    lens visible under an error banner instead of wiping it.
-> 2. **Honest rendering rules, pinned by tests** — provider cost card says
->    *failures included*; zero revenue renders `0%` with a "no revenue yet"
->    note (never NaN); negative margins render in rose with
->    `data-margin="negative"` instead of being hidden; demo tiers show
->    `$0.00` cost; the tier-vs-global revenue distinction (charged vs
->    consumed credits — they differ by exactly your refunds) is written on
->    the page. Snapshot stamp shown as UTC; plan chip carries the caller's
->    plan.
-> 3. **`InsightsView` DTO types** in `dto.ts` (client-safe mirror of the
->    T7 snapshot shape).
+> 1. **The cover rule** (`src/lib/social.ts`, 8 specs) — a completed
+>    dream's still is its poster asset (image dreams), else the middle
+>    keyframe of its pinned timeline (video dreams — the most
+>    representative frame). A board's cover is the newest completed
+>    dream's still; boards with nothing completed get `null`, never a
+>    fake. `listBoards` computes every cover in one extra flat query
+>    (completed jobs newest-first, first still wins per board); the
+>    public payloads expose per-job `posterPath` plus a board-level
+>    `coverPath`.
+> 2. **Covers in the UI** — board cards render the still as a thumbnail
+>    (honest alt text) with a branded night placeholder when empty; the
+>    public board page and job share page pass `poster=` to every
+>    `<video>` so previews land instantly.
+> 3. **OG imagery everywhere** — the share page pins the dream's still as
+>    `og:image` / `twitter:image` (a real still beats the incomplete
+>    player card: `summary_large_image` with the poster, player only when
+>    there is a video but no still, text-only summary as the last
+>    resort); the public board page pins the board cover the same way;
+>    the landing ships a branded 1200x630 night card (`public/og.png`,
+>    regenerated via `bun run scripts/make-og-image.ts` — sharp/librsvg,
+>    deterministic, no AI imagery).
 >
-> The whole suite is **262 specs green** (6 new), `tsc --noEmit` clean,
-> `eslint .` zero errors (11 pre-existing unused-disable warnings, none in
-> the new files).
-> **Next (T9):** board cover stills / OG imagery for the landing; durable
-> storage (Turso/Neon) and blob media; multi-model routing across hosted +
-> self-hosted tiers.
+> The whole suite is **275 specs green** (13 new), `tsc --noEmit` clean,
+> `eslint .` zero errors (same 11 pre-existing unused-disable warnings).
+> **Next (T10):** durable storage (Turso/Neon) and blob media; multi-model
+> routing across hosted + self-hosted tiers.
 
 ---
 

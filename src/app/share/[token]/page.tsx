@@ -32,6 +32,8 @@ interface SharedJobPayload {
   author: { name: string; avatarSeed: string }
   likeCount: number
   videoPath: string | null
+  /** The dream's still (poster / middle keyframe) — OG image + video poster. */
+  posterPath: string | null
 }
 
 function siteUrl(): string {
@@ -101,6 +103,7 @@ export async function generateMetadata({
   const description = excerpt(payload.job.prompt, 180)
   const base = siteUrl()
   const ogVideo = payload.videoPath ? `${base}${payload.videoPath}` : undefined
+  const ogImage = payload.posterPath ? `${base}${payload.posterPath}` : undefined
   return {
     title,
     description,
@@ -111,8 +114,15 @@ export async function generateMetadata({
       description,
       type: 'video.other',
       ...(ogVideo ? { videos: [{ url: ogVideo, type: 'video/mp4' }] } : {}),
+      ...(ogImage ? { images: [{ url: ogImage }] } : {}),
     },
-    twitter: ogVideo ? { card: 'player', title, description } : { card: 'summary', title, description },
+    // a real still beats an incomplete player card: summary_large_image
+    // renders everywhere; the text-only summary is the honest fallback
+    twitter: ogImage
+      ? { card: 'summary_large_image', title, description, images: [ogImage] }
+      : ogVideo
+        ? { card: 'player', title, description }
+        : { card: 'summary', title, description },
   }
 }
 
@@ -181,7 +191,7 @@ export default async function SharePage({
   const payload = await fetchSharedJob(token)
   if (!payload) return <ShareUnavailable />
 
-  const { job, author, likeCount, videoPath } = payload
+  const { job, author, likeCount, videoPath, posterPath } = payload
 
   return (
     <main className="min-h-screen bg-zinc-950 text-zinc-100">
@@ -216,6 +226,7 @@ export default async function SharePage({
           <div className={`overflow-hidden rounded-2xl border border-zinc-800 bg-black ${aspectStyle(job.aspectRatio)}`}>
             <video
               src={videoPath}
+              poster={posterPath ?? undefined}
               controls
               muted
               loop={job.loop}

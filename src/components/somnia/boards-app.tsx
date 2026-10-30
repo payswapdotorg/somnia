@@ -147,45 +147,69 @@ export function BoardsApp({ user }: BoardsAppProps) {
           boards.map((board) => (
             <article
               key={board.id}
-              className="rounded-xl border border-border/60 bg-card/60 p-4 transition hover:border-primary/30"
+              className="overflow-hidden rounded-xl border border-border/60 bg-card/60 transition hover:border-primary/30"
             >
-              <div className="flex flex-wrap items-start justify-between gap-2">
-                <div>
-                  <h3 className="font-medium tracking-tight">{board.name}</h3>
-                  {board.description && (
-                    <p className="mt-0.5 text-sm text-muted-foreground">{board.description}</p>
-                  )}
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {board.jobCount} {board.jobCount === 1 ? 'dream' : 'dreams'}
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  {board.shareToken ? (
-                    <span className="flex items-center gap-2">
-                      <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[11px] font-medium text-emerald-500">
-                        shared
-                      </span>
-                      <a
-                        href={`/boards/${board.shareToken}`}
-                        className="max-w-40 truncate text-xs text-primary underline-offset-4 hover:underline"
-                      >
-                        /boards/{board.shareToken}
-                      </a>
-                    </span>
-                  ) : (
-                    <Button variant="outline" size="sm" onClick={() => void shareBoard(board)} disabled={busy}>
-                      Share
-                    </Button>
-                  )}
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => void removeBoard(board)}
-                    disabled={busy}
-                    title="Delete — the dreams survive, detached"
+              <div className="flex flex-col sm:flex-row">
+                {/* cover still — newest completed dream; branded placeholder
+                    when the board has nothing finished yet (never a fake) */}
+                {board.coverPath ? (
+                  <img
+                    src={board.coverPath}
+                    alt={`${board.name} cover`}
+                    loading="lazy"
+                    className="h-28 w-full shrink-0 bg-black object-cover sm:h-auto sm:w-44"
+                  />
+                ) : (
+                  <div
+                    data-testid={`cover-${board.id}`}
+                    data-cover="empty"
+                    aria-hidden="true"
+                    className="relative h-28 w-full shrink-0 overflow-hidden bg-zinc-950 sm:h-auto sm:w-44"
                   >
-                    Delete
-                  </Button>
+                    <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,rgba(139,92,246,0.35),transparent_70%)]" />
+                    <div className="absolute inset-0 flex items-center justify-center text-2xl font-bold text-zinc-700">
+                      S
+                    </div>
+                  </div>
+                )}
+                <div className="flex flex-1 flex-wrap items-start justify-between gap-2 p-4">
+                  <div>
+                    <h3 className="font-medium tracking-tight">{board.name}</h3>
+                    {board.description && (
+                      <p className="mt-0.5 text-sm text-muted-foreground">{board.description}</p>
+                    )}
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {board.jobCount} {board.jobCount === 1 ? 'dream' : 'dreams'}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {board.shareToken ? (
+                      <span className="flex items-center gap-2">
+                        <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[11px] font-medium text-emerald-500">
+                          shared
+                        </span>
+                        <a
+                          href={`/boards/${board.shareToken}`}
+                          className="max-w-40 truncate text-xs text-primary underline-offset-4 hover:underline"
+                        >
+                          /boards/{board.shareToken}
+                        </a>
+                      </span>
+                    ) : (
+                      <Button variant="outline" size="sm" onClick={() => void shareBoard(board)} disabled={busy}>
+                        Share
+                      </Button>
+                    )}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => void removeBoard(board)}
+                      disabled={busy}
+                      title="Delete — the dreams survive, detached"
+                    >
+                      Delete
+                    </Button>
+                  </div>
                 </div>
               </div>
             </article>

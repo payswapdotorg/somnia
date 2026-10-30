@@ -14,8 +14,13 @@ export const metadata: Metadata = {
     siteName: BRAND.name,
     title: `${BRAND.name} — What will you dream today?`,
     description: BRAND.description,
+    // the branded night card — scripts/make-og-image.ts regenerates it
+    images: [{ url: '/og.png', width: 1200, height: 630, alt: `${BRAND.name} — ${BRAND.tagline}` }],
   },
-  twitter: { card: 'summary_large_image' },
+  twitter: {
+    card: 'summary_large_image',
+    images: ['/og.png'],
+  },
 }
 
 export default function CreatePage() {
