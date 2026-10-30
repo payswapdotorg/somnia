@@ -1,6 +1,62 @@
 # Somnia — repo handoff instructions
 
-> **Current state (T12, multi-model routing):** on top of the T11 durable
+> **Current state (T13, hosted LLM tier for agent planning):** on top of the
+> T12 routing tree, agent planning is now served by a REAL hosted LLM. What
+> landed:
+>
+> 1. **`src/lib/llm.ts`** — an OpenAI-compatible chat client behind the same
+>    env-gated, lazily-re-read contract as every other provider knob:
+>    `OPENROUTER_API_KEY` activates it, `LLM_BASE_URL` (default
+>    `https://openrouter.ai/api/v1`), `LLM_MODEL` (default
+>    `meta-llama/llama-3.3-70b-instruct`, verified answering strict JSON) and
+>    `LLM_TIMEOUT_MS` (default 20s) override. The client NEVER throws —
+>    unconfigured, network error, timeout, non-2xx, malformed body and
+>    missing content all decline to null, so an LLM outage can never block
+>    planning. Every failure logs a reason (status/error only — never the
+>    key) for the Vercel function logs.
+> 2. **Budget-aware 402 retry** — OpenRouter's credit pre-flight reserves
+>    `max_tokens` worth of credit, so a low-balance key 402s an 800-token
+>    planning request even though the actual generation costs ~$0.00005. On a
+>    402 whose remedy hint names an affordable budget ("…can only afford
+>    300") the request retries ONCE at that budget; below a 120-token floor
+>    (a usable shot cannot fit) or without the hint it declines. Verified
+>    against real OpenRouter: 800 → 402 afford 289 → 200 with a complete
+>    two-shot plan (`finish_reason: stop`).
+> 3. **`planner.ts` chain** — hosted LLM first, the sandbox z-ai SDK as the
+>    dev-sandbox second chance, the deterministic angle builder as the
+>    always-available floor; `llmPlanner` stays hermetic under SOMNIA_TEST.
+>    `plannerViaHosted` is exported so the suite drives it against a local
+>    gateway and injects it into `planAgentRun` as a production-shaped
+>    planner. **health** reports `llmConfigured` (boolean only) +
+>    `llmModel` display string.
+> 4. **Production wiring** — `OPENROUTER_API_KEY` set on the Vercel project
+>    (encrypted, production/preview/development) BEFORE the code push.
+>    Smoke-verified on somnia-bay.vercel.app (6/6,
+>    `scripts/t13-smoke.mjs` outside the repo): health reports
+>    `llmConfigured=true llmModel=meta-llama/llama-3.3-70b-instruct`, and an
+>    agent run is planned by the REAL LLM — `planner: "llm"` with
+>    LLM-authored prompts ("The lighthouse keeper stands at the top of the
+>    tower, gazing out at the stormy sea…"), not the heuristic template.
+>
+> The suite is **329 specs green** (22 in `tests/llm.test.ts`: config
+> detection + lazy re-read, request shape, every decline path, the 402
+> retry/floor/no-hint matrix, hermeticity under SOMNIA_TEST, health DTO,
+> and the agent-run integration through a local gateway).
+> `tsc --noEmit` clean, `eslint .` zero errors (same 11 pre-existing
+> warnings).
+> **OPERATOR NOTE:** the wired OpenRouter key rides nearly-exhausted free
+> credits — the 402 retry keeps planning alive at reduced budgets for a
+> handful more runs (~$0.00005 per plan), then it declines honestly to the
+> heuristic. Top up credits at openrouter.ai/settings/credits for headroom.
+> **Next (T14):** the video tier is the remaining honest-placeholder surface
+> (`activeProvider: demo` in health): wire `FAL_KEY` (fal.ai) or
+> `SELFHOSTED_URL` (GPU gateway) on Vercel and set `SOMNIA_MODEL_ROUTES` to
+> split models across tiers — the routing/failover layer (T12) is already
+> built and waiting.
+
+---
+
+> **Prior state (T12, multi-model routing):** on top of the T11 durable
 > media tree, the provider layer grew per-model routing + failover. What
 > landed:
 >
