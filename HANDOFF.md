@@ -1,6 +1,84 @@
 # Somnia — repo handoff instructions
 
-> **Current state (T14, render truth + dispatch repair):** the
+> **Current state (T15, the live video tier):** production renders REAL
+> hosted video today. The T14 runbook needed an operator key that did not
+> exist (`FAL_KEY` / a GPU gateway); T15 stood the tier up with what the
+> operator DOES have — an E2B sandbox. What landed:
+>
+> 1. **The E2B render gateway (ops, outside the repo)** — a zero-dependency
+>    Node service in an E2B sandbox implements the selfhosted queue contract
+>    byte-for-byte (`scripts/e2b/` on the dev box: `gateway.mjs` + `up.mjs`
+>    + `vercel-wire.mjs` + `verify-gateway.mjs`). Imagery: the user's pinned
+>    keyframes verbatim, or REAL AI keyframes from the keyless
+>    `api.a0.dev` image endpoint (Replicate-backed cache; Pollinations is
+>    IP-rate-limited on E2B and unusable) with the exact storyboard beats the
+>    local pipeline uses. Composite: ffmpeg Ken Burns mirroring
+>    `src/lib/video.ts` semantics 1:1 (alternating zoom, 2× working buffer,
+>    crossfade chain, H.264 yuv420p faststart 30fps, resolution CRF).
+>    Honest model id: `e2b-kenburns-cpu` — a CPU compositor of real AI
+>    imagery, not a GPU diffusion box, and health says exactly that. A
+>    supervisor loop restarts the gateway if it dies; the sandbox lives 24h
+>    (`up.mjs` reuses a live one or recreates + reprints wiring; `--kill`
+>    stops the ~$0.166/h uptime meter; `--redeploy` hot-swaps code;
+>    `--selftest` re-proves the contract).
+> 2. **Pinned-timeline fidelity (repo, TDD)** — `HostedRenderInput.keyframes`
+>    now carries the job's FULL ordered pinned timeline to hosted tiers (the
+>    adapter sends `keyframes` alongside `start_frame`/`end_frame`; the
+>    pipeline passes the Keyframe rows in order). Before T15 a pinned job
+>    rendered hosted silently REGENERATED its middle beats from the prompt —
+>    the user's imagery was thrown away. The gateway composites the pinned
+>    frames verbatim; a prompt-only job sends `[]`.
+> 3. **Transient-hiccup resilience (repo, TDD)** — the self-hosted adapter
+>    retries the submission ONCE and tolerates two consecutive failed status
+>    polls before failing: a gateway restart blip (E2B edge answers
+>    401/502/503 for a moment — observed live during development) never
+>    fails a charged render. Persistent outages still fail fast and refund;
+>    the T12 failover test now pins the two-attempt-then-failover contract.
+> 4. **`maxDuration = 300`** (was 60) — a hosted render must settle inside
+>    its invocation (success, or failure + refund), and keyless image
+>    generation varies 3-90s wall. The gateway enforces its own 240s hard
+>    deadline underneath; the Fluid Compute 300s ceiling was accepted by the
+>    platform and the deploy is live with it.
+> 5. **Production wiring (before the code push, T10/T13 pattern)** —
+>    Vercel env (encrypted, production/preview/development):
+>    `SELFHOSTED_URL` (the sandbox's public `3000-<id>.e2b.app` URL),
+>    `SELFHOSTED_API_KEY` (gateway bearer), `SELFHOSTED_MODEL=
+>    e2b-kenburns-cpu`, and `SOMNIA_PROVIDER_COSTS` with the honest E2B
+>    marginal costs (`pulse-3`/`pulse-flash`: $0.002 540p/720p, $0.003
+>    1080p; prism $0.0005) — Insights margins now report real spend instead
+>    of the owned-GPU planning estimates.
+> 6. **Smoke-verified on production** (37/37, `scripts/t15-smoke.mjs`
+>    outside the repo): health flips `activeProvider: selfhosted` with every
+>    video model routed to the live tier; a prompt-only dream renders a REAL
+>    hosted MP4 in ~18s (`placeholderRender: false`, blob URL, $0.002 cost
+>    stamp, 3 gateway keyframes ingested as frame assets); a pinned-timeline
+>    dream composites the user's own 3 keyframes through the gateway;
+>    extend/reframe/upscale work on the real dream; the public share page
+>    carries NO simulated-render badge; insights reports the selfhosted tier
+>    (costUsd $0.006 for the three smoke renders); Range 206 off the CDN.
+>
+> The suite is **355 specs green** (5 new in `tests/providers.test.ts`: the
+> pinned-timeline passthrough, prompt-only `keyframes: []`, submit-retry,
+> poll tolerance, persistent-poll failure + refund; the T12 failover spec
+> updated to the two-attempt contract). `tsc --noEmit` clean, `eslint .` zero
+> errors (same 11 pre-existing warnings). NOTE: the suite is network-bound
+> against the Neon test DB — chunk the run (~5 files per invocation).
+> **Known constraints, honestly:** the gateway URL changes when the sandbox
+> is recreated (re-run `vercel-wire.mjs` + redeploy); the sandbox bills
+> ~$0.166/h while idle (`up.mjs --kill` stops it — renders then fail-and-
+> refund until it is back); prism stills still render locally (placeholder
+> art + honest flag on serverless — image jobs never route hosted);
+> keyless imagery latency varies 3-90s per render.
+> **Next (T16):** route prism image jobs through the gateway too (an image
+> endpoint beside the video queue — kills the last placeholder surface), and
+> automate the gateway keep-alive (a daily `up.mjs` cron, or E2B
+> pause/resume to hold the URL stable); the moment a real GPU or fal key
+> appears, swap the imagery source in `gateway.mjs` — the contract, routing
+> and failover already speak it.
+
+---
+
+> **Prior state (T14, render truth + dispatch repair):** the
 > honest-placeholder surface the T13 note pointed at (wiring
 > `FAL_KEY`/`SELFHOSTED_URL`) needs an operator-side key that does not exist
 > yet — so T14 shipped the OTHER half of that honesty: the app now TELLS THE

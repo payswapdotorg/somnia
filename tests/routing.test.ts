@@ -313,7 +313,10 @@ describe('routing — pipeline', () => {
 
       const done = await processJob(job.id, { frameSource: fakeFrameSource().source })
       expect(done.status).toBe('completed')
-      expect(gwSelf.submits).toHaveLength(1) // it was tried…
+      // T15: the self-hosted adapter retries the submission ONCE before
+      // giving the tier up (a restart blip must not fail a charged render),
+      // so a persistently-rejecting gateway sees exactly two attempts…
+      expect(gwSelf.submits).toHaveLength(2)
       expect(gwFal.submits).toHaveLength(1) // …and the fal tier finished it
       expect(done.providerCostUsd).toBe(0.12) // fal pulse-3 720p, not selfhosted's 0.09
 
