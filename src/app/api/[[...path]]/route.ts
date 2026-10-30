@@ -12,8 +12,12 @@ import { dispatchSomnia } from '@/lib/somnia-api'
  */
 
 /** Generation pipelines and ffmpeg transforms must finish within the
- * function's budget on serverless — request the full 60s ceiling. */
-export const maxDuration = 60
+ * function's budget on serverless. T15: the self-hosted render tier rides
+ * behind this function (submit → poll → ingest, a hosted render can take
+ * 60-90s wall) — request the full Fluid Compute 300s ceiling so a real
+ * hosted render always settles inside the invocation (success, or failure +
+ * refund); the gateway enforces its own 240s deadline underneath. */
+export const maxDuration = 300
 
 export const dynamic = 'force-dynamic'
 

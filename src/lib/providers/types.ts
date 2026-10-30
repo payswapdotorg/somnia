@@ -24,6 +24,14 @@ export interface HostedRenderInput {
   startFramePath: string | null
   /** Pinned last frame (public-relative path). */
   endFramePath: string | null
+  /**
+   * T15 pinned-timeline fidelity: the job's ordered pinned keyframes (durable
+   * references — blob URLs in production, public-relative paths in dev/test).
+   * Gateways that composite user imagery should use these verbatim instead of
+   * regenerating the storyboard from the prompt; empty for prompt-only jobs.
+   * Optional so adapters with fixed vendor payloads (fal) can omit it.
+   */
+  keyframes?: string[]
 }
 
 export interface HostedRenderResult {

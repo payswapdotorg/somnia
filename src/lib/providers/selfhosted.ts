@@ -9,14 +9,18 @@
 //
 //   POST {SELFHOSTED_URL}/v1/video/jobs
 //        { model, prompt, resolution, duration_sec, aspect_ratio,
-//          hdr, loop, start_frame?, end_frame? }     → 202 { id }
+//          hdr, loop, start_frame?, end_frame?, keyframes }  → 202 { id }
 //   GET  {SELFHOSTED_URL}/v1/video/jobs/{id}
 //        { status: 'queued'|'running'|'succeeded'|'failed',
 //          progress?: 0..100, error?: string,
 //          video_url?: string, frames?: string[] }
 //
-// Frame fields carry public-relative paths (`/generated/...`); gateways that
-// need the pixels resolve them against the app origin.
+// Frame fields carry public-relative paths (`/generated/...`) or durable
+// absolute URLs (blob CDN); gateways that need the pixels resolve them
+// (absolute URLs fetch directly, relative paths against the app origin).
+// `keyframes` is the job's full ordered pinned timeline — compositing
+// gateways render the user's own imagery verbatim instead of regenerating
+// a storyboard; it is an empty array for prompt-only jobs.
 //
 // Env gating (NEVER active without configuration):
 //   SELFHOSTED_URL       base URL of the gateway — required to activate
@@ -34,6 +38,14 @@ import type {
 const SUBMIT_TIMEOUT_MS = 20_000
 const POLL_TIMEOUT_MS = 15 * 60 * 1000
 const POLL_INTERVAL_MS = 3_000
+
+// T15 transient-hiccup resilience: a real self-hosted gateway restarts
+// (sandbox recycle, supervisor respawn) and its edge answers 401/502/503 for
+// a moment. One submit retry + a small consecutive-poll tolerance rides out
+// exactly that window; anything persistent still fails and refunds.
+const SUBMIT_ATTEMPTS = 2
+const POLL_FAILURE_TOLERANCE = 2
+const RETRY_DELAY_MS = process.env.SOMNIA_TEST ? 15 : 2_000
 
 const PROGRESS_FLOOR = 8
 const PROGRESS_CEILING = 86
@@ -68,7 +80,7 @@ interface GatewayJobStatus {
   frames?: string[]
 }
 
-async function submitJob(input: HostedRenderInput): Promise<{ id: string }> {
+async function submitJobOnce(input: HostedRenderInput): Promise<{ id: string }> {
   const response = await fetch(`${baseUrl()}/v1/video/jobs`, {
     method: 'POST',
     headers: gatewayHeaders(),
@@ -83,6 +95,9 @@ async function submitJob(input: HostedRenderInput): Promise<{ id: string }> {
       loop: input.loop,
       start_frame: input.startFramePath,
       end_frame: input.endFramePath,
+      // T15: the full pinned timeline — always present (empty for prompt-only
+      // jobs) so gateways can composite the user's imagery verbatim.
+      keyframes: input.keyframes ?? [],
     }),
   })
   if (!response.ok) {
@@ -93,6 +108,20 @@ async function submitJob(input: HostedRenderInput): Promise<{ id: string }> {
     throw new Error('self-hosted gateway returned no job id')
   }
   return { id: data.id }
+}
+
+/** Submit with one retry — rides out a gateway restart blip, fails fast on a persistent one. */
+async function submitJob(input: HostedRenderInput): Promise<{ id: string }> {
+  let lastError: unknown = null
+  for (let attempt = 1; attempt <= SUBMIT_ATTEMPTS; attempt++) {
+    if (attempt > 1) await sleep(RETRY_DELAY_MS)
+    try {
+      return await submitJobOnce(input)
+    } catch (error) {
+      lastError = error
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(String(lastError))
 }
 
 async function pollJob(gatewayJobId: string): Promise<GatewayJobStatus> {
@@ -118,9 +147,20 @@ async function renderSelfHosted(
 
   const deadline = Date.now() + timeoutMs
   let progress = PROGRESS_FLOOR
+  let pollFailures = 0
   while (Date.now() < deadline) {
     await sleep(intervalMs)
-    const status = await pollJob(submission.id)
+    let status: GatewayJobStatus
+    try {
+      status = await pollJob(submission.id)
+      pollFailures = 0
+    } catch (error) {
+      // T15: a single dropped poll (edge hiccup, gateway restart) must not
+      // fail a charged render — tolerate a couple in a row, then give up.
+      pollFailures += 1
+      if (pollFailures > POLL_FAILURE_TOLERANCE) throw error
+      continue
+    }
 
     if (status.status === 'queued') continue
 

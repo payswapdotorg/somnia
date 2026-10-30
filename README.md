@@ -156,11 +156,16 @@ resolved cost-control-first:
    wrapper around Wan 2.2 / LTX-2.5 / HunyuanVideo; optional
    `SELFHOSTED_MODEL`, `SELFHOSTED_API_KEY`). Contract:
    `POST {url}/v1/video/jobs` `{model, prompt, resolution, duration_sec,
-   aspect_ratio, hdr, loop, start_frame?, end_frame?}` → `{id}`, then
-   `GET {url}/v1/video/jobs/{id}` → `{status, progress?, error?,
-   video_url?, frames?}`. Remote progress is mirrored into the job row; the
-   finished MP4 is downloaded into `public/generated/<jobId>-provider.mp4`
-   (remote-URL fallback if the download fails).
+   aspect_ratio, hdr, loop, start_frame?, end_frame?, keyframes}` → `{id}`,
+   then `GET {url}/v1/video/jobs/{id}` → `{status, progress?, error?,
+   video_url?, frames?}`. `keyframes` is the job's full ordered pinned
+   timeline (durable absolute URLs or app-relative paths) so compositing
+   gateways render the user's own imagery verbatim; a prompt-only job sends
+   `[]`. Remote progress is mirrored into the job row; the finished MP4 is
+   downloaded into `public/generated/<jobId>-provider.mp4` (remote-URL
+   fallback if the download fails). The submit is retried ONCE and status
+   polls tolerate two consecutive failures — a gateway restart blip never
+   fails a charged render (T15); anything persistent fails and refunds.
 2. **fal.ai-style queue** — set `FAL_KEY` (optional `FAL_MODEL`, and
    `FAL_QUEUE_BASE` to retarget the queue origin). Submit → status poll →
    result fetch, `Authorization: Key <FAL_KEY>`.
@@ -214,16 +219,48 @@ remaining honest-placeholder line, and the UI around it tells the truth.
 
 Adapters are pure HTTP + download — the pipeline owns every database write,
 so hosted and local renders share identical ledger, refund and asset
-semantics (pinned by `tests/providers.test.ts`, 14 specs against a scripted
+semantics (pinned by `tests/providers.test.ts`, 17 specs against a scripted
 local gateway).
+
+### The live tier (T15): an E2B render gateway
+
+Production runs a REAL self-hosted tier today — not a rented GPU box, and it
+says so honestly:
+
+- **What it is** — a zero-dependency Node render gateway (`SELFHOSTED_URL`,
+  model id `e2b-kenburns-cpu`) running in an E2B sandbox behind a supervisor
+  loop. Imagery: the user's pinned keyframes verbatim, or REAL AI keyframes
+  from the keyless `api.a0.dev` image endpoint (Replicate-backed cache) with
+  the same storyboard beats the local pipeline uses. Composite: ffmpeg Ken
+  Burns — the exact `src/lib/video.ts` semantics (alternating zoom, 2×
+  working buffer, crossfade chain, H.264 yuv420p faststart, resolution CRF).
+  A job whose imagery cannot be produced FAILS — placeholder art never poses
+  as a hosted render, so `placeholderRender` stays false only for genuinely
+  real renders.
+- **Economics** — E2B bills ~$0.166/hour of sandbox uptime (2 vCPU);
+  `SOMNIA_PROVIDER_COSTS` pins the marginal per-render cost at
+  `pulse-3/pulse-flash`: $0.002 (540p/720p) / $0.003 (1080p), prism stills
+  $0.0005. The sandbox also burns uptime while idle — `node up.mjs --kill`
+  stops the meter; renders then fail-and-refund honestly until it is back.
+- **Lifecycle** — the sandbox lives up to 24h (its public URL is its
+  identity). The ops script is idempotent: `E2B_API_KEY=… node up.mjs`
+  reuses a live gateway or recreates everything (fresh URL → re-run
+  `vercel-wire.mjs` → redeploy). `--redeploy` hot-swaps gateway code;
+  `--selftest` re-proves the full contract. Keep-alive = re-run daily, or
+  accept honest fail-and-refund while it is down.
+- **Latency** — a 5s 540p render takes 10–90s wall (the keyless image
+  endpoint's generation time dominates and varies); the API function runs at
+  `maxDuration = 300` so every render settles inside its invocation, and the
+  gateway enforces a 240s hard deadline under it.
 
 ## Serverless notes (Vercel)
 
 `DATABASE_URL` is the pooled Neon connection string (serverless-safe:
 `-pooler` host + `pgbouncer=true&connection_limit=1`) — storage is durable
 Postgres, shared by every function instance, so a job created by
-`POST /api/generate` is immediately visible to `GET /api/jobs`. Mutating
-routes export `maxDuration = 60`; generation runs through
-`afterResponse`/`waitUntil`. Set `NEXT_PUBLIC_SITE_URL` for absolute
-OpenGraph URLs on share pages. (The pre-T10 per-instance SQLite seed
-bootstrap is gone with the Postgres migration.)
+`POST /api/generate` is immediately visible to `GET /api/jobs`. The API
+route exports `maxDuration = 300` (Fluid Compute ceiling — T15: a hosted
+render must settle, success or refund, inside its invocation); generation
+runs through `afterResponse`/`waitUntil`. Set `NEXT_PUBLIC_SITE_URL` for
+absolute OpenGraph URLs on share pages. (The pre-T10 per-instance SQLite
+seed bootstrap is gone with the Postgres migration.)

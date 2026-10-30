@@ -63,6 +63,10 @@ class FakeGateway {
   watchJobId: string | null = null
   pollScript: Array<Record<string, unknown>> = []
   submitStatus = 202
+  /** Leading submits to reject with 503 before accepting (transient-hiccup sim). */
+  submitFailures = 0
+  /** Leading polls to answer with HTTP 500 before serving the script (transient-hiccup sim). */
+  pollFailures = 0
   falResult: Record<string, unknown> = {}
   clip = CLIP
   frame = FRAME
@@ -106,6 +110,12 @@ class FakeGateway {
         body,
         authorization: req.headers.authorization,
       })
+      if (this.submitFailures > 0) {
+        this.submitFailures -= 1
+        res.writeHead(503, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ error: 'gateway restarting' }))
+        return
+      }
       if (this.submitStatus !== 202) {
         res.writeHead(this.submitStatus, { 'content-type': 'application/json' })
         res.end(JSON.stringify({ error: 'gateway rejected' }))
@@ -119,6 +129,12 @@ class FakeGateway {
     // ---- status polls ----
     if (this.mode === 'selfhosted' && method === 'GET' && url === '/v1/video/jobs/gw-1') {
       this.polls.push(url)
+      if (this.pollFailures > 0) {
+        this.pollFailures -= 1
+        res.writeHead(500, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ error: 'edge hiccup' }))
+        return
+      }
       const next = this.pollScript.shift() ?? { status: 'succeeded', video_url: `${this.url}/clip.mp4` }
       if (this.watchJobId) {
         const job = await db.job.findUnique({ where: { id: this.watchJobId } })
@@ -314,6 +330,7 @@ describe('providers — self-hosted gateway', () => {
       expect(body!.loop).toBe(true)
       expect(body!.start_frame).toBe(job.startFramePath)
       expect(body!.end_frame).toBe(job.endFramePath)
+      expect(body!.keyframes).toEqual([]) // prompt-only job: the timeline is empty, not missing
     } finally {
       await gw.close()
     }
@@ -425,6 +442,65 @@ describe('providers — self-hosted gateway', () => {
       await gw.close()
     }
   })
+
+  // ------------------------------------------------ T15 transient-hiccup resilience
+  // A real self-hosted gateway restarts (sandbox recycle, supervisor respawn):
+  // the edge answers 401/502/503 for a moment, and single status polls can
+  // fail transiently. The adapter rides those out instead of failing a paid,
+  // charged render on a one-off blip.
+
+  it('retries the submission once when the gateway hiccups transiently', async () => {
+    const gw = await new FakeGateway('selfhosted').start()
+    process.env.SELFHOSTED_URL = gw.url
+    gw.submitFailures = 1 // first submit → 503, second → 202
+    try {
+      const user = await newUser()
+      const job = await createJob({ userId: user.id, prompt: 'a render past a gateway restart blip' })
+
+      const done = await processJob(job.id)
+      expect(done.status).toBe('completed')
+      expect(gw.submits).toHaveLength(2) // exactly one retry — never a blind hammer
+      expect(gw.polls.length).toBeGreaterThanOrEqual(1)
+    } finally {
+      await gw.close()
+    }
+  })
+
+  it('rides out transient status-poll failures while polling', async () => {
+    const gw = await new FakeGateway('selfhosted').start()
+    process.env.SELFHOSTED_URL = gw.url
+    gw.pollFailures = 2 // two leading 500 polls, then the script
+    gw.pollScript = [{ status: 'succeeded', video_url: `${gw.url}/clip.mp4`, frames: [] }]
+    try {
+      const user = await newUser()
+      const job = await createJob({ userId: user.id, prompt: 'a render past edge blips' })
+
+      const done = await processJob(job.id)
+      expect(done.status).toBe('completed')
+      expect(gw.polls.length).toBeGreaterThanOrEqual(3)
+    } finally {
+      await gw.close()
+    }
+  })
+
+  it('fails and refunds when poll errors persist beyond the tolerance', async () => {
+    const gw = await new FakeGateway('selfhosted').start()
+    process.env.SELFHOSTED_URL = gw.url
+    gw.pollFailures = 99 // every poll 500s forever
+    try {
+      const user = await newUser()
+      const before = await balance(user.id)
+      const job = await createJob({ userId: user.id, prompt: 'a gateway that stays down' })
+
+      const done = await processJob(job.id)
+      expect(done.status).toBe('failed')
+      expect(done.errorMessage).toContain('500')
+      expect(await balance(user.id)).toBe(before)
+      expect(gw.polls.length).toBeLessThanOrEqual(5) // tolerance (2) + the failing throw, not a full timeout grind
+    } finally {
+      await gw.close()
+    }
+  })
 })
 
 // ---------------------------------------------------------------- fal queue
@@ -528,7 +604,7 @@ describe('providers — pipeline routing', () => {
     }
   })
 
-  it('routes pinned-timeline video jobs through the provider with first/last frames', async () => {
+  it('routes pinned-timeline video jobs through the provider with the full timeline', async () => {
     const gw = await new FakeGateway('selfhosted').start()
     process.env.SELFHOSTED_URL = gw.url
     try {
@@ -551,6 +627,16 @@ describe('providers — pipeline routing', () => {
       const body = gw.submits[0]?.body
       expect(body!.start_frame).toBe(job.startFramePath)
       expect(body!.end_frame).toBe(job.endFramePath)
+
+      // T15 pinned-timeline fidelity: the gateway receives EVERY pinned frame in
+      // timeline order, not just the mirrored first/last — a hosted render must
+      // composite the user's own imagery, never silently regenerate it.
+      const pinned = await db.keyframe.findMany({
+        where: { jobId: job.id },
+        orderBy: { order: 'asc' },
+      })
+      expect(pinned).toHaveLength(3)
+      expect(body!.keyframes).toEqual(pinned.map((k) => k.path))
     } finally {
       await gw.close()
     }

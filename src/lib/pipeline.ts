@@ -278,6 +278,13 @@ export async function processJob(jobId: string, opts: ProcessOptions = {}): Prom
       })
     } else if (chain.length > 0) {
       // ---- hosted tiers: try each in failover order ----
+      // T15 pinned-timeline fidelity: the gateway receives the job's full
+      // ordered pinned timeline so it composites the user's own imagery —
+      // a hosted render must never silently regenerate a pinned storyboard.
+      const pinnedTimeline = await db.keyframe.findMany({
+        where: { jobId: job.id },
+        orderBy: { order: 'asc' },
+      })
       let result: HostedRenderResult | null = null
       let renderedBy: HostedVideoProvider | null = null
       let lastError: unknown = null
@@ -295,6 +302,7 @@ export async function processJob(jobId: string, opts: ProcessOptions = {}): Prom
               loop: job.loop,
               startFramePath: job.startFramePath,
               endFramePath: job.endFramePath,
+              keyframes: pinnedTimeline.map((k) => k.path),
             },
             {
               onProgress: async (pct) => {
