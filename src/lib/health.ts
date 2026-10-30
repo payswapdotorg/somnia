@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process'
 import { resolveFfmpegBin } from '@/lib/runtime'
 import { resolveVideoProvider } from '@/lib/providers'
 import { isBlobConfigured } from '@/lib/blob'
+import { effectiveRoutes } from '@/lib/routing'
 
 import { db } from '@/lib/db'
 
@@ -17,6 +18,8 @@ export interface ProviderHealthDto {
   selfHostedModel: string | null
   /** Blob store wired (BLOB_READ_WRITE_TOKEN)? Boolean only — durable media vs per-instance scratch. */
   blobStorageConfigured: boolean
+  /** Effective per-model routing (T12): which tier serves each video model right now. */
+  modelRoutes: Record<string, string>
   ffmpegAvailable: boolean
   /** Parsed from `ffmpeg -version` (first line); null when unavailable. */
   ffmpegVersion: string | null
@@ -125,6 +128,7 @@ export async function getProviderHealth(): Promise<ProviderHealthDto> {
       ? (process.env.SELFHOSTED_MODEL ?? 'wan2.2-t2v-5b')
       : null,
     blobStorageConfigured: isBlobConfigured(),
+    modelRoutes: effectiveRoutes(),
     ffmpegAvailable: ffmpeg.available,
     ffmpegVersion: ffmpeg.version,
     lastJobAt: lastJob?.updatedAt.toISOString() ?? null,

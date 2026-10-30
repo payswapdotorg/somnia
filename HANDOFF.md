@@ -1,6 +1,38 @@
 # Somnia — repo handoff instructions
 
-> **Current state (T11, durable media storage — Vercel Blob):** on top of the
+> **Current state (T12, multi-model routing):** on top of the T11 durable
+> media tree, the provider layer grew per-model routing + failover. What
+> landed:
+>
+> 1. **`src/lib/routing.ts`** — the route table is env-overridable
+>    (`SOMNIA_MODEL_ROUTES` JSON, `{"pulse-3":"selfhosted","pulse-flash":
+>    "fal"}`) and re-read lazily per call. A pinned-but-unconfigured tier
+>    falls back to the cost-control chain (selfhosted → fal), which itself
+>    is exactly the pre-T12 behavior when no routes are set.
+> 2. **Pipeline failover** — `processJob` renders video jobs down
+>    `failoverOrder(job.model)`: the routed tier first, then the remaining
+>    configured REAL tier. When every configured tier fails the job fails
+>    and refunds — it NEVER silently degrades a paid render to the local
+>    placeholder pipeline. The operator cost stamp (and
+>    `Generation.provider`) is corrected to the tier that actually
+>    rendered, so Insights margins stay honest after a failover.
+> 3. **Health surface** — `GET /api/providers/health` reports `modelRoutes`
+>    (effective per-model tier, computed from env + configuration).
+>
+> The suite is **307 specs green** (12 new in `tests/routing.test.ts`: table
+> parsing/fallback, failover order, effective routes + health DTO, and the
+> headline pipeline specs — two models routed to two different backends in
+> one process; failover completing via the second tier with the cost
+> re-stamped $0.09→$0.12; exhausted failover refunding; explicit provider
+> injection still pinning exactly one tier). `tsc --noEmit` clean, `eslint .`
+> zero errors (same 11 pre-existing warnings).
+> **Next (T13):** wire a real hosted provider key on Vercel (FAL_KEY or a
+> self-hosted GPU gateway) and set SOMNIA_MODEL_ROUTES to split the models
+> across tiers; the demo placeholder path stays the honest no-key default.
+
+---
+
+> **Prior state (T11, durable media storage — Vercel Blob):** on top of the
 > T10 Neon tree, generated media is now durable too. What landed:
 >
 > 1. **The blob layer** — `src/lib/blob.ts` is the media twin of the Neon

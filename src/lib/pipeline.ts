@@ -29,7 +29,8 @@ import { markJobCompleted, markJobFailed } from '@/lib/engine'
 import { providerCostUsd } from '@/lib/economics'
 import { framePath, writeBuffer } from '@/lib/frames'
 import { renderVideo } from '@/lib/video'
-import { resolveVideoProvider, type HostedVideoProvider } from '@/lib/providers'
+import { failoverOrder } from '@/lib/routing'
+import type { HostedRenderResult, HostedVideoProvider } from '@/lib/providers'
 import type { Job } from '@prisma/client'
 
 // ---------------------------------------------------------------- frame source
@@ -173,29 +174,37 @@ export async function processJob(jobId: string, opts: ProcessOptions = {}): Prom
   if (job.status !== 'queued') return job
 
   const source = opts.frameSource ?? defaultFrameSource
-  // Hosted tiers render VIDEO jobs only — prism stills always stay local.
-  const provider =
+  // T12 — multi-model routing: the render order for this job's model (the
+  // pinned route first, then the remaining configured tiers as failover
+  // candidates). An explicit opts.provider pins exactly one tier; null
+  // forces the local composite path. Hosted tiers render VIDEO jobs only —
+  // prism stills always stay local.
+  const chain: HostedVideoProvider[] =
     job.kind === 'video'
       ? opts.provider !== undefined
         ? opts.provider
-        : resolveVideoProvider()
-      : null
+          ? [opts.provider]
+          : []
+        : failoverOrder(job.model)
+      : []
 
   // T7 — provider economics: stamp what this render costs the operator at
   // dispatch time. Demo/local compositing is free; hosted tiers look up the
   // per-model table (env-overridable). The stamp survives failures on
   // purpose: a failed hosted render still burns real GPU/API money, while
-  // the customer is made whole through the engine's refund.
-  const providerName = provider?.name ?? 'demo'
-  const costUsd = providerCostUsd({
-    provider: providerName,
+  // the customer is made whole through the engine's refund. T12: when a
+  // failover completes on a different tier, the stamp is corrected below to
+  // the provider that actually rendered — Insights margins stay honest.
+  const costInput = {
     kind: job.kind,
     model: job.model,
     resolution: job.resolution,
     durationSec: job.durationSec || 5,
     hdr: job.hdr,
     loop: job.loop,
-  })
+  } as const
+  const providerName = chain[0]?.name ?? 'demo'
+  const costUsd = providerCostUsd({ provider: providerName, ...costInput })
   const generation = await db.generation.create({
     data: { jobId: job.id, provider: providerName, status: 'running' },
   })
@@ -218,32 +227,69 @@ export async function processJob(jobId: string, opts: ProcessOptions = {}): Prom
         where: { id: generation.id },
         data: { status: 'succeeded', imagePath },
       })
-    } else if (provider) {
-      // ---- hosted tier: submit → poll (progress mirrored) → ingest ----
-      const result = await provider.render(
-        {
-          jobId: job.id,
-          prompt: job.prompt,
-          model: job.model,
-          resolution: job.resolution,
-          aspectRatio: job.aspectRatio,
-          durationSec: job.durationSec || 5,
-          hdr: job.hdr,
-          loop: job.loop,
-          startFramePath: job.startFramePath,
-          endFramePath: job.endFramePath,
-        },
-        {
-          onProgress: async (pct) => {
-            await db.job
-              .update({
-                where: { id: job.id },
-                data: { progress: Math.max(0, Math.min(99, pct)) },
-              })
-              .catch(() => undefined)
-          },
+    } else if (chain.length > 0) {
+      // ---- hosted tiers: try each in failover order ----
+      let result: HostedRenderResult | null = null
+      let renderedBy: HostedVideoProvider | null = null
+      let lastError: unknown = null
+      for (const provider of chain) {
+        try {
+          result = await provider.render(
+            {
+              jobId: job.id,
+              prompt: job.prompt,
+              model: job.model,
+              resolution: job.resolution,
+              aspectRatio: job.aspectRatio,
+              durationSec: job.durationSec || 5,
+              hdr: job.hdr,
+              loop: job.loop,
+              startFramePath: job.startFramePath,
+              endFramePath: job.endFramePath,
+            },
+            {
+              onProgress: async (pct) => {
+                await db.job
+                  .update({
+                    where: { id: job.id },
+                    data: { progress: Math.max(0, Math.min(99, pct)) },
+                  })
+                  .catch(() => undefined)
+              },
+            }
+          )
+          renderedBy = provider
+          break
+        } catch (error) {
+          lastError = error
+          console.warn(
+            `[pipeline] provider ${provider.name} failed for job ${job.id}${
+              chain.some((p) => p.name !== provider.name) ? ', trying the next tier' : ''
+            }:`,
+            (error as Error)?.message ?? error
+          )
         }
-      )
+      }
+      if (!result || !renderedBy) {
+        // every configured tier failed — fail and refund; never silently
+        // degrade a paid render to the local placeholder pipeline
+        throw lastError instanceof Error ? lastError : new Error(String(lastError))
+      }
+      if (renderedBy.name !== providerName) {
+        // T12 failover bookkeeping: the operator pays (and Insights reports)
+        // the tier that ACTUALLY rendered, not the one that was routed first
+        await db.job
+          .update({
+            where: { id: job.id },
+            data: {
+              providerCostUsd: providerCostUsd({ provider: renderedBy.name, ...costInput }),
+            },
+          })
+          .catch(() => undefined)
+        await db.generation
+          .update({ where: { id: generation.id }, data: { provider: renderedBy.name } })
+          .catch(() => undefined)
+      }
 
       if (result.frames.length > 0) {
         await db.asset.createMany({
