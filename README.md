@@ -133,7 +133,7 @@ trial grant is 1,000 credits, no card required.
 ## Tests
 
 ```bash
-bun run test                # 278 specs: domain core, HTTP surface, render pipeline, UI contracts
+bun run test                # 350 specs: domain core, HTTP surface, render pipeline, UI contracts
 ```
 
 The suite runs against a **dedicated throwaway Neon project** — set
@@ -142,7 +142,8 @@ The suite runs against a **dedicated throwaway Neon project** — set
 brainstorm, inputs, plans, economics), engine, social,
 apikeys, agents (+ LLM planner sanitizer), insights (the margin lens), auth,
 the full HTTP dispatcher, the ffmpeg pipeline (real MP4s), the hosted
-provider adapters (against a scripted local HTTP gateway), and jsdom
+provider adapters (against a scripted local HTTP gateway), render truth
+(placeholder flagging + the SDK availability probe), and jsdom
 contract tests for every UI surface (auth, composer, explore, history,
 boards/keys/plans, agents, landing).
 
@@ -170,6 +171,46 @@ pinned timeline sends its first/last frames as `start_frame`/`end_frame`
 refund path as local renders — a failed hosted job never costs credits.
 Without keys the demo pipeline renders branded storyboard beats; the health
 endpoint (`/api/providers/health`) always names the active tier.
+
+### Demo-tier honesty (render truth, T14)
+
+Without a hosted provider key the app never pretends otherwise — it says
+what a "dream" actually is on that deployment:
+
+- **`Job.placeholderRender`** — the render pipeline knows when a frame
+  degraded to the branded placeholder (image SDK unreachable, e.g. on
+  Vercel) and flags the job. The clip is still a real seekable MP4, but every
+  surface says "simulated render": the composer's active-job card, history
+cards + detail, explore cards, and the public share pages. Pinned timelines
+  (the user's own imagery) and hosted-tier renders are never flagged.
+- **`imageSdkAvailable`** in `/api/providers/health` — can the local image
+  SDK initialize in this deployment? `demo` + `true` means composites of
+  real generated keyframes (the dev sandbox); `demo` + `false` means
+  placeholder art. Boolean only, like every other provider knob.
+- **The composer notice** — signed-in users on a `demo` deployment see an
+  amber note above the forge button spelling out what renders actually are
+  there (and that charges/refunds still apply).
+
+### Wiring the video tier in 5 minutes (operator runbook)
+
+The routing/failover layer (T12) is built and waiting — going live is env
+work on the Vercel project, not code:
+
+1. Pick a tier (or both): set `FAL_KEY` (fal.ai) and/or `SELFHOSTED_URL`
+   (+ optional `SELFHOSTED_MODEL`, `SELFHOSTED_API_KEY`) as Vercel env vars
+   for production/preview/development — encrypted, set BEFORE the next
+   deploy so no instance boots half-wired.
+2. Optionally pin models to tiers: `SOMNIA_MODEL_ROUTES='
+   {"pulse-3":"selfhosted","pulse-flash":"fal"}'` (unknown ids and
+   malformed JSON are ignored; a pinned-but-unconfigured tier falls back to
+   the cost-control chain).
+3. Redeploy and verify: `GET /api/providers/health` → `activeProvider`
+   flips off `demo`, `modelRoutes` shows the split, and the composer notice
+   disappears. A real generation then lands a hosted MP4 ingested into the
+   blob store (cross-instance durable, Range-seekable off the CDN).
+
+That's the whole surface: `activeProvider: demo` in health is the only
+remaining honest-placeholder line, and the UI around it tells the truth.
 
 Adapters are pure HTTP + download — the pipeline owns every database write,
 so hosted and local renders share identical ledger, refund and asset

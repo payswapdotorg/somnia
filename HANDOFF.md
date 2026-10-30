@@ -1,6 +1,58 @@
 # Somnia — repo handoff instructions
 
-> **Current state (T13, hosted LLM tier for agent planning):** on top of the
+> **Current state (T14, render truth):** the honest-placeholder surface the
+> T13 note pointed at (wiring `FAL_KEY`/`SELFHOSTED_URL`) needs an
+> operator-side key that does not exist yet — so T14 shipped the OTHER half
+> of that honesty: the app now TELLS THE TRUTH about every simulated render,
+> and wiring a real tier became a documented 5-minute env job. What landed:
+>
+> 1. **`Job.placeholderRender`** (schema, additive Boolean) — the render
+>    pipeline already knew when a frame degraded to the branded placeholder
+>    (image SDK unreachable, e.g. serverless); that fact was being thrown
+>    away and jobs posed as fully real renders. Now the flag persists with
+>    the job: video beats AND prism stills set it when ANY frame falls back
+>    (mixed degradation flags too); pinned timelines (the user's own
+>    imagery) and hosted-tier renders (a remote MP4 is real by definition)
+>    never set it. Column pushed to production Neon BEFORE the code push —
+>    additive, zero disruption to the running deployment.
+> 2. **The flag flows everywhere a render is shown** — owner job detail
+>    (getJob DTO), the public share payload (`getSharedJob`), the ideas
+>    feed (`listIdeas` items). Every surface renders a "simulated render"
+>    chip: the composer's active-job card, history list cards + detail
+>    panel, explore cards, and the PUBLIC share pages (honesty extends to
+>    anonymous viewers).
+> 3. **`imageSdkAvailable` in health** — a process-cached probe
+>    (`imageSdkProbe` in pipeline.ts) answers whether the local image SDK
+>    can initialize in this deployment: `demo` + `true` = composites of
+>    real generated keyframes (the dev sandbox); `demo` + `false` =
+>    placeholder art (serverless). Hermetic under SOMNIA_TEST; boolean only,
+>    same rule as every provider knob; test seam via `__resetImageSdkProbe`.
+> 4. **The composer notice** — signed-in users on a `demo` deployment see
+>    an amber note above the forge button spelling out what a "dream"
+>    actually is there (placeholder art vs locally generated keyframes,
+>    keyed off the probe; charges/refunds still apply). It disappears the
+>    moment a hosted tier is wired.
+> 5. **Operator runbook** — README "Wiring the video tier in 5 minutes":
+>    set `FAL_KEY` and/or `SELFHOSTED_URL` on the Vercel project (before
+>    the next deploy), optionally `SOMNIA_MODEL_ROUTES`, redeploy, verify
+>    via `/api/providers/health`. The T12 routing/failover layer is built
+>    and waiting; going live is env work, not code.
+>
+> The suite is **350 specs green** (21 new: 13 in `tests/render-truth.test.ts`
+> — flag semantics incl. mixed degradation + pinned/hosted exclusions, DTO
+> passthrough x3, hermetic probe + injected initializer + health DTO; 8 UI
+> specs across create/history/covers — the notice both variants, silence on
+> a hosted tier, the chip on cards/detail/share pages, no chip on real
+> renders). `tsc --noEmit` clean, `eslint .` zero errors (same 11
+> pre-existing warnings). Production DB column pushed pre-deploy.
+> **Next (T15):** the moment an operator provides `FAL_KEY` or a GPU
+> gateway URL, wire it per the runbook, set `SOMNIA_MODEL_ROUTES`, and
+> smoke-verify a real hosted render end to end (health flip + hosted MP4
+> ingested to blob). Until then every surface honestly says "demo".
+
+---
+
+> **Prior state (T13, hosted LLM tier for agent planning):** on top of the
 > T12 routing tree, agent planning is now served by a REAL hosted LLM. What
 > landed:
 >

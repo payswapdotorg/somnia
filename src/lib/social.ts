@@ -193,6 +193,8 @@ export async function getSharedJob(token: string) {
       loop: job.loop,
       hdr: job.hdr,
       createdAt: job.createdAt,
+      // T14 render truth — public honesty: simulated imagery says so
+      placeholderRender: job.placeholderRender,
     },
     author: { name: job.user.name, avatarSeed: job.user.avatarSeed },
     likeCount,
@@ -235,6 +237,8 @@ export interface FeedItem {
   videoPath: string | null
   likeCount: number
   likedByMe: boolean
+  /** T14 render truth — the imagery is placeholder art (demo tier). */
+  placeholderRender: boolean
 }
 
 export async function listIdeas(opts: {
@@ -290,6 +294,7 @@ export async function listIdeas(opts: {
       j.assets.find((a) => a.kind === 'video' && a.variantKey === 'main')?.path ?? null,
     likeCount: countMap.get(j.id) ?? 0,
     likedByMe: likedSet.has(j.id),
+    placeholderRender: j.placeholderRender,
   }))
   return { items, total }
 }

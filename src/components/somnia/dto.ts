@@ -52,6 +52,8 @@ export interface JobView {
   boardId: string | null
   agentRunId: string | null
   createdAt: string
+  /** T14 render truth — the imagery is placeholder art (demo tier, SDK unreachable). */
+  placeholderRender: boolean
   keyframes: KeyframeView[]
   assets: AssetView[]
 }
@@ -82,6 +84,8 @@ export interface FeedItemView {
   videoPath: string | null
   likeCount: number
   likedByMe: boolean
+  /** T14 render truth — the imagery is placeholder art (demo tier). */
+  placeholderRender: boolean
 }
 
 export interface BoardView {
@@ -157,6 +161,20 @@ export interface AgentPlanStepView {
   shot: number
   prompt: string
   note: string
+}
+
+/**
+ * The health fields a client surface needs (T14): which tier renders right
+ * now and — on the demo tier — whether its keyframes are real generated
+ * imagery or placeholder art. Mirror of the server ProviderHealthDto
+ * (client-safe subset; the server type stays in src/lib/health.ts).
+ */
+export interface ProviderHealthSummaryView {
+  activeProvider: string
+  imageSdkAvailable: boolean
+  llmConfigured: boolean
+  llmModel: string | null
+  modelRoutes: Record<string, string>
 }
 
 /** Agent run view returned by the /api/agents routes. */

@@ -247,6 +247,7 @@ export function HistoryApp({ user }: HistoryAppProps) {
               {job.kind === 'video' && <MetaChip>{job.durationSec}s</MetaChip>}
               <MetaChip>{job.creditsCharged} cr</MetaChip>
               {job.shareToken && <MetaChip>shared</MetaChip>}
+              {job.placeholderRender && <MetaChip>simulated render</MetaChip>}
             </div>
           </button>
         ))}
@@ -288,6 +289,7 @@ export function HistoryApp({ user }: HistoryAppProps) {
               {selected.hdr && <MetaChip>HDR</MetaChip>}
               {selected.loop && <MetaChip>loop</MetaChip>}
               <MetaChip>{selected.creditsCharged} credits</MetaChip>
+              {selected.placeholderRender && <MetaChip>simulated render</MetaChip>}
             </div>
           </div>
 

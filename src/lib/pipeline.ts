@@ -22,6 +22,12 @@
 // The SDK import stays dynamic: environments where it cannot initialize
 // (serverless without credentials) fall straight through to the
 // placeholder instead of failing the module.
+//
+// T14 — render truth: when the local composite path degrades to placeholder
+// art (the SDK is unreachable), the finished job is FLAGGED
+// (Job.placeholderRender) instead of quietly posing as a real render. The
+// clip itself is real — a seekable MP4 — but the imagery is simulated, and
+// every surface (history, composer, explore, share pages) says so.
 
 import sharp from 'sharp'
 import { db } from '@/lib/db'
@@ -91,6 +97,44 @@ async function generateWithSdk(
 
 /** The production source: real imagery when the SDK is reachable. */
 export const defaultFrameSource: FrameSource = { generate: generateWithSdk }
+
+// ------------------------------------------------------- SDK availability probe
+
+/**
+ * Whether the server-side image SDK can initialize in this deployment —
+ * the difference between "local composites of real generated keyframes"
+ * and "local composites of placeholder art". Probed once per process
+ * (the same caching rule as the ffmpeg probe); SOMNIA_TEST short-circuits
+ * to false so the hermetic suite never touches the SDK. Boolean only —
+ * never a key, never an error detail.
+ */
+const globalForSdkProbe = globalThis as unknown as {
+  somniaImageSdkProbe?: Promise<boolean>
+}
+
+async function defaultSdkInit(): Promise<boolean> {
+  if (process.env.SOMNIA_TEST) return false
+  try {
+    const { default: ZAI } = await import('z-ai-web-dev-sdk')
+    await ZAI.create()
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** Test seam: drop the cached probe so a fresh initializer runs. */
+export function __resetImageSdkProbe(): void {
+  delete globalForSdkProbe.somniaImageSdkProbe
+}
+
+export function imageSdkProbe(init?: () => Promise<boolean>): Promise<boolean> {
+  if (!globalForSdkProbe.somniaImageSdkProbe) {
+    const run = init ?? defaultSdkInit
+    globalForSdkProbe.somniaImageSdkProbe = run().catch(() => false)
+  }
+  return globalForSdkProbe.somniaImageSdkProbe
+}
 
 // ---------------------------------------------------------------- placeholder
 
@@ -216,12 +260,17 @@ export async function processJob(jobId: string, opts: ProcessOptions = {}): Prom
   try {
     if (job.kind === 'image') {
       const buffer = await source.generate(job.prompt, 'still image', job.aspectRatio)
+      // T14 render truth — null from the source means the placeholder ran
+      const usedPlaceholder = buffer === null
       const png =
         buffer ?? (await placeholderBuffer(job.prompt, 1, 1, job.aspectRatio))
       // writeBuffer returns the durable reference (blob URL when a store is
       // wired) — the database remembers that, not the ephemeral local path
       const imagePath = await writeBuffer(stillPath(job.id), png)
       await db.job.update({ where: { id: job.id }, data: { progress: 80 } })
+      if (usedPlaceholder) {
+        await db.job.update({ where: { id: job.id }, data: { placeholderRender: true } })
+      }
       await markJobCompleted(job.id, { imagePath })
       await db.generation.update({
         where: { id: generation.id },
@@ -312,6 +361,11 @@ export async function processJob(jobId: string, opts: ProcessOptions = {}): Prom
         orderBy: { order: 'asc' },
       })
 
+      // T14 render truth — set when ANY frame of this render is placeholder
+      // art. Pinned timelines are the user's own imagery (never flagged);
+      // hosted tiers return real remote MP4s (never flagged).
+      let usedPlaceholder = false
+
       let middle: string[]
       if (pinned.length > 0) {
         // A pinned timeline IS the storyboard — the engine already mirrored
@@ -327,6 +381,7 @@ export async function processJob(jobId: string, opts: ProcessOptions = {}): Prom
             STORYBOARD_BEATS[(i - 1) % STORYBOARD_BEATS.length],
             job.aspectRatio
           )
+          if (buffer === null) usedPlaceholder = true
           const png =
             buffer ?? (await placeholderBuffer(job.prompt, i, count, job.aspectRatio))
           const durablePath = await writeBuffer(framePath(job.id, i), png)
@@ -335,6 +390,10 @@ export async function processJob(jobId: string, opts: ProcessOptions = {}): Prom
         await db.asset.createMany({
           data: middle.map((p) => ({ jobId: job.id, kind: 'frame', path: p })),
         })
+      }
+
+      if (usedPlaceholder) {
+        await db.job.update({ where: { id: job.id }, data: { placeholderRender: true } })
       }
 
       const segments =

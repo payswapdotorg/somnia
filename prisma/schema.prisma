@@ -70,6 +70,10 @@ model Job {
   errorMessage   String?
   creditsCharged Int      @default(0)
   providerCostUsd Float   @default(0)
+  // T14 render truth: the local composite path degraded to placeholder art
+  // for at least one frame (image SDK unreachable). The render is REAL
+  // (a seekable MP4) but the imagery is simulated — every surface says so.
+  placeholderRender Boolean @default(false)
   idempotencyKey String   @unique
   shareToken     String?  @unique // public unlisted /share/<token> link
   sharedAt       DateTime?

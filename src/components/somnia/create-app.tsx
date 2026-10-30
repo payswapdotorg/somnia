@@ -21,6 +21,7 @@ import {
   TERMINAL_STATUSES,
   type JobView,
   type RemixPrefill,
+  type ProviderHealthSummaryView,
 } from '@/components/somnia/dto'
 import {
   ASPECT_RATIOS,
@@ -68,6 +69,9 @@ export function CreateApp({ user, prefill, onCreditsChanged }: CreateAppProps) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [activeJob, setActiveJob] = useState<JobView | null>(null)
+  // T14 render truth — the provider tier this deployment renders on, fetched
+  // once so the composer can tell the user what a "dream" actually is here.
+  const [health, setHealth] = useState<ProviderHealthSummaryView | null>(null)
   const fileInput = useRef<HTMLInputElement>(null)
 
   // Apply a remix prefill that arrives after mount (the history surface
@@ -97,6 +101,33 @@ export function CreateApp({ user, prefill, onCreditsChanged }: CreateAppProps) {
         if (alive && body.boards) setBoards(body.boards)
       } catch {
         // network hiccup — the picker simply stays empty
+      }
+    })()
+    return () => {
+      alive = false
+    }
+  }, [user])
+
+  // --------------------------------------------------- provider tier (T14)
+  useEffect(() => {
+    if (!user) return
+    let alive = true
+    void (async () => {
+      try {
+        const res = await fetch('/api/providers/health', { credentials: 'same-origin' })
+        if (!res.ok) return
+        const body = (await res.json()) as Partial<ProviderHealthSummaryView>
+        if (alive && typeof body.activeProvider === 'string') {
+          setHealth({
+            activeProvider: body.activeProvider,
+            imageSdkAvailable: !!body.imageSdkAvailable,
+            llmConfigured: !!body.llmConfigured,
+            llmModel: body.llmModel ?? null,
+            modelRoutes: body.modelRoutes ?? {},
+          })
+        }
+      } catch {
+        // network hiccup — the notice simply stays hidden
       }
     })()
     return () => {
@@ -406,6 +437,23 @@ export function CreateApp({ user, prefill, onCreditsChanged }: CreateAppProps) {
           </p>
         )}
 
+        {/* T14 render truth — say what a "dream" actually is on this deployment. */}
+        {health?.activeProvider === 'demo' && (
+          <div
+            data-testid="demo-tier-notice"
+            role="note"
+            className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-amber-700 dark:text-amber-400"
+          >
+            <span className="font-semibold">Demo tier</span> — this deployment has no
+            generation provider wired: video renders are local storyboard composites
+            {health.imageSdkAvailable
+              ? ' of locally generated keyframes.'
+              : ' of placeholder art, watermarked as simulated.'}{' '}
+            Charges still apply and failed renders refund; wire a hosted provider key
+            to render with a real model.
+          </div>
+        )}
+
         <Button type="submit" size="lg" className="w-full" disabled={busy}>
           {busy ? 'Rendering the request…' : 'Dream it'}
         </Button>
@@ -551,6 +599,7 @@ export function CreateApp({ user, prefill, onCreditsChanged }: CreateAppProps) {
               <MetaChip>{activeJob.aspectRatio}</MetaChip>
               {activeJob.kind === 'video' && <MetaChip>{activeJob.durationSec}s</MetaChip>}
               <MetaChip>{activeJob.creditsCharged} credits</MetaChip>
+              {activeJob.placeholderRender && <MetaChip>simulated render</MetaChip>}
               <span className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
                 <AvatarBlob seed={user.avatarSeed} name={user.name} size="sm" />
                 {user.name}

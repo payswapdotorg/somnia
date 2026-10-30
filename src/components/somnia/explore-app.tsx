@@ -169,6 +169,7 @@ export function ExploreApp({ viewer }: ExploreAppProps) {
                 <MetaChip>{item.aspectRatio}</MetaChip>
                 {item.durationSec > 0 && <MetaChip>{item.durationSec}s</MetaChip>}
                 {item.loop && <MetaChip>loop</MetaChip>}
+                {item.placeholderRender && <MetaChip>simulated render</MetaChip>}
               </div>
               <div className="flex items-center justify-between">
                 <span className="flex items-center gap-2 text-xs text-muted-foreground">

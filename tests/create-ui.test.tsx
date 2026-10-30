@@ -42,6 +42,7 @@ const QUEUED_JOB = {
   status: 'queued',
   progress: 0,
   creditsCharged: 100,
+  placeholderRender: false,
   keyframes: [],
   assets: [],
 }
@@ -112,6 +113,90 @@ describe('CreateApp — signed out', () => {
     expect(link).toHaveAttribute('href', '/signin')
     expect(screen.queryByRole('button', { name: /dream it/i })).not.toBeInTheDocument()
     expect(fetch).toHaveBeenCalledTimes(0)
+  })
+})
+
+describe('CreateApp — render truth (T14)', () => {
+  it('shows the demo-tier notice when health reports activeProvider demo', async () => {
+    stubFetch({
+      '/api/boards': { status: 200, body: () => ({ boards: [] }) },
+      '/api/providers/health': {
+        status: 200,
+        body: () => ({
+          activeProvider: 'demo',
+          imageSdkAvailable: false,
+          llmConfigured: true,
+          llmModel: 'meta-llama/llama-3.3-70b-instruct',
+          modelRoutes: { 'pulse-3': 'demo', 'pulse-flash': 'demo' },
+        }),
+      },
+    })
+    render(<CreateApp user={USER} />)
+
+    const notice = await screen.findByTestId('demo-tier-notice')
+    expect(notice).toHaveTextContent(/demo tier/i)
+    expect(notice).toHaveTextContent(/placeholder art/i)
+  })
+
+  it('softens the notice when the local image SDK is reachable (real keyframes)', async () => {
+    stubFetch({
+      '/api/boards': { status: 200, body: () => ({ boards: [] }) },
+      '/api/providers/health': {
+        status: 200,
+        body: () => ({
+          activeProvider: 'demo',
+          imageSdkAvailable: true,
+          llmConfigured: false,
+          llmModel: null,
+          modelRoutes: {},
+        }),
+      },
+    })
+    render(<CreateApp user={USER} />)
+
+    const notice = await screen.findByTestId('demo-tier-notice')
+    expect(notice).toHaveTextContent(/locally generated keyframes/i)
+    expect(notice).not.toHaveTextContent(/placeholder art/i)
+  })
+
+  it('stays silent when a hosted provider tier is active', async () => {
+    stubFetch({
+      '/api/boards': { status: 200, body: () => ({ boards: [] }) },
+      '/api/providers/health': {
+        status: 200,
+        body: () => ({
+          activeProvider: 'fal',
+          imageSdkAvailable: false,
+          llmConfigured: false,
+          llmModel: null,
+          modelRoutes: { 'pulse-3': 'fal' },
+        }),
+      },
+    })
+    render(<CreateApp user={USER} />)
+
+    await waitFor(() =>
+      expect(fetchMock().mock.calls.some(([u]) => String(u) === '/api/providers/health')).toBe(true)
+    )
+    expect(screen.queryByTestId('demo-tier-notice')).not.toBeInTheDocument()
+  })
+
+  it('badges a completed simulated render on the active job card', async () => {
+    stubFetch({
+      '/api/boards': { status: 200, body: () => ({ boards: [] }) },
+      '/api/providers/health': { status: 200, body: () => ({ activeProvider: 'demo', imageSdkAvailable: false }) },
+      '/api/generate': { status: 201, body: () => ({ job: QUEUED_JOB }) },
+      '/api/jobs/job_1': {
+        status: 200,
+        body: () => ({ job: { ...COMPLETED_JOB, placeholderRender: true } }),
+      },
+    })
+    render(<CreateApp user={USER} />)
+
+    await waitFor(() => expect(screen.getByText(/100 credits/i)).toBeInTheDocument())
+    await submitPrompt('bioluminescent tide pool at night')
+
+    await waitFor(() => expect(screen.getByText(/simulated render/i)).toBeInTheDocument())
   })
 })
 

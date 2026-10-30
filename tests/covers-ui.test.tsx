@@ -11,7 +11,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import '@testing-library/jest-dom/vitest'
 import { render, screen, cleanup } from '@testing-library/react'
 import { BoardsApp } from '@/components/somnia/boards-app'
-import { generateMetadata as shareMetadata } from '@/app/share/[token]/page'
+import SharePage, { generateMetadata as shareMetadata } from '@/app/share/[token]/page'
 import { generateMetadata as boardMetadata } from '@/app/boards/[token]/page'
 import type { SessionUser } from '@/hooks/use-session'
 
@@ -114,6 +114,28 @@ function stubJson(url: string, body: unknown) {
     }
   )
 }
+
+describe('share page — render truth (T14)', () => {
+  it('badges a simulated render publicly — placeholder art says so on the page', async () => {
+    const shared = SHARED_JOB('/generated/j_1-poster.png')
+    stubJson(`${BASE}/api/jobs/shared/tok_sim`, {
+      ...shared,
+      job: { ...shared.job, placeholderRender: true },
+    })
+    const page = await SharePage({ params: Promise.resolve({ token: 'tok_sim' }) })
+    render(page)
+
+    expect(screen.getByText(/simulated render/i)).toBeInTheDocument()
+  })
+
+  it('renders no badge for a real-imagery dream', async () => {
+    stubJson(`${BASE}/api/jobs/shared/tok_real`, SHARED_JOB('/generated/j_1-poster.png'))
+    const page = await SharePage({ params: Promise.resolve({ token: 'tok_real' }) })
+    render(page)
+
+    expect(screen.queryByText(/simulated render/i)).not.toBeInTheDocument()
+  })
+})
 
 describe('BoardsApp — cover thumbnails', () => {
   it('renders the cover still with an honest alt; placeholder when a board has none', async () => {

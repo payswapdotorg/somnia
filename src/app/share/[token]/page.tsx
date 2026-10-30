@@ -29,6 +29,8 @@ interface SharedJobPayload {
     loop: boolean
     hdr: boolean
     createdAt: string
+    /** T14 render truth — the imagery is placeholder art (demo tier). */
+    placeholderRender?: boolean
   }
   author: { name: string; avatarSeed: string }
   likeCount: number
@@ -253,6 +255,7 @@ export default async function SharePage({
             {job.durationSec > 0 && <MetaChip>{job.durationSec}s</MetaChip>}
             {job.loop && <MetaChip>loop</MetaChip>}
             {job.hdr && <MetaChip>HDR</MetaChip>}
+            {job.placeholderRender && <MetaChip>simulated render</MetaChip>}
             <MetaChip>{formatDate(job.createdAt)}</MetaChip>
           </div>
 

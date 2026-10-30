@@ -53,6 +53,7 @@ function jobDto(overrides: Record<string, unknown> = {}) {
     shareToken: null,
     sharedAt: null,
     boardId: null,
+    placeholderRender: false,
     createdAt: '2026-10-28T00:00:00.000Z',
     keyframes: [
       { id: 'k_1', jobId: 'job_1', order: 1, path: '/generated/job_1-f1.png', createdAt: '2026-10-28T00:00:00.000Z' },
@@ -126,6 +127,36 @@ describe('HistoryApp — signed out', () => {
     const link = screen.getByRole('link', { name: /sign in/i })
     expect(link).toHaveAttribute('href', '/signin')
     expect(fetch).toHaveBeenCalledTimes(0)
+  })
+})
+
+describe('HistoryApp — render truth (T14)', () => {
+  it('badges simulated renders on the list card AND the detail panel', async () => {
+    stubFetch({
+      '/api/jobs': {
+        body: {
+          jobs: [
+            jobDto({ placeholderRender: true }),
+            jobDto({ id: 'job_2', prompt: 'storm over copper rooftops' }),
+          ],
+        },
+      },
+    })
+    render(<HistoryApp user={USER} />)
+
+    // the simulated dream carries the chip on its list card…
+    expect(await screen.findByText(/simulated render/i)).toBeInTheDocument()
+    // …and on its detail panel
+    await openFirstJobDetail()
+    expect(screen.getAllByText(/simulated render/i).length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('renders no simulated badge for real-imagery jobs', async () => {
+    stubFetch({ '/api/jobs': { body: { jobs: [jobDto()] } } })
+    render(<HistoryApp user={USER} />)
+
+    expect(await screen.findByText(/paper boat drifting through neon canals/i)).toBeInTheDocument()
+    expect(screen.queryByText(/simulated render/i)).not.toBeInTheDocument()
   })
 })
 

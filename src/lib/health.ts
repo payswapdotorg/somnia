@@ -4,6 +4,7 @@ import { resolveVideoProvider } from '@/lib/providers'
 import { isBlobConfigured } from '@/lib/blob'
 import { effectiveRoutes } from '@/lib/routing'
 import { hostedLlmConfig } from '@/lib/llm'
+import { imageSdkProbe } from '@/lib/pipeline'
 
 import { db } from '@/lib/db'
 
@@ -23,6 +24,12 @@ export interface ProviderHealthDto {
   llmConfigured: boolean
   /** Display string for the hosted LLM model id (or null). */
   llmModel: string | null
+  /**
+   * T14 render truth — can the local image SDK initialize here? On the demo
+   * tier this is the difference between composites of real generated
+   * keyframes and composites of placeholder art. Boolean only.
+   */
+  imageSdkAvailable: boolean
   /** Effective per-model routing (T12): which tier serves each video model right now. */
   modelRoutes: Record<string, string>
   ffmpegAvailable: boolean
@@ -124,6 +131,7 @@ export async function getProviderHealth(): Promise<ProviderHealthDto> {
     last5mStatuses.find((g) => g.status === status)?._count._all ?? 0
 
   const llm = hostedLlmConfig()
+  const imageSdk = await imageSdkProbe()
 
   return {
     // The render pipeline resolves the hosted tier on every job (dynamic env
@@ -137,6 +145,7 @@ export async function getProviderHealth(): Promise<ProviderHealthDto> {
     blobStorageConfigured: isBlobConfigured(),
     llmConfigured: !!llm,
     llmModel: llm ? llm.model : null,
+    imageSdkAvailable: imageSdk,
     modelRoutes: effectiveRoutes(),
     ffmpegAvailable: ffmpeg.available,
     ffmpegVersion: ffmpeg.version,
