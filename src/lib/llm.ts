@@ -24,6 +24,12 @@ const DEFAULT_BASE_URL = 'https://openrouter.ai/api/v1'
 const DEFAULT_TIMEOUT_MS = 20_000
 const DEFAULT_MAX_TOKENS = 800
 const DEFAULT_TEMPERATURE = 0.7
+/**
+ * Floor for the 402 budget retry: a single sanitized shot needs ~60-80
+ * tokens plus JSON wrapper, so an affordable budget below this cannot carry
+ * a usable answer — decline instead of a doomed truncation.
+ */
+const MIN_RETRY_TOKENS = 120
 
 export interface HostedLlmConfig {
   /** API root without a trailing slash (…/v1). */
@@ -63,6 +69,13 @@ function timeoutFromEnv(opts: HostedChatOptions): number {
  * message text, or null on ANY failure (unconfigured, network error,
  * timeout, non-2xx, malformed body, missing content) — never throws, so
  * callers can fall through to the next planner in the chain.
+ *
+ * Budget-aware retry: OpenRouter's credit pre-flight reserves max_tokens
+ * worth of credit, so a low-balance key rejects e.g. 800 tokens even though
+ * the actual generation costs a fraction of it. On a 402 whose remedy hint
+ * names an affordable budget ("…can only afford 300") the request is retried
+ * ONCE at that budget — below MIN_RETRY_TOKENS, or without the hint, it
+ * declines (the heuristic fallback stays the honest floor).
  */
 export async function hostedChatCompletion(
   messages: HostedChatMessage[],
@@ -71,25 +84,40 @@ export async function hostedChatCompletion(
   const config = hostedLlmConfig()
   if (!config) return null
 
-  try {
-    const response = await fetch(`${config.baseUrl}/chat/completions`, {
+  const maxTokens = opts.maxTokens ?? DEFAULT_MAX_TOKENS
+  const temperature = opts.temperature ?? DEFAULT_TEMPERATURE
+
+  const post = (budget: number) =>
+    fetch(`${config.baseUrl}/chat/completions`, {
       method: 'POST',
       headers: {
         authorization: `Bearer ${config.apiKey}`,
         'content-type': 'application/json',
       },
-      body: JSON.stringify({
-        model: config.model,
-        messages,
-        temperature: opts.temperature ?? DEFAULT_TEMPERATURE,
-        max_tokens: opts.maxTokens ?? DEFAULT_MAX_TOKENS,
-      }),
+      body: JSON.stringify({ model: config.model, messages, temperature, max_tokens: budget }),
       signal: AbortSignal.timeout(timeoutFromEnv(opts)),
     })
+
+  try {
+    let response = await post(maxTokens)
+
+    if (response.status === 402) {
+      const errorText = await response.text().catch(() => '')
+      const affordable = /can only afford (\d+)/.exec(errorText)
+      const budget = affordable ? Number(affordable[1]) : 0
+      if (budget >= MIN_RETRY_TOKENS && budget < maxTokens) {
+        response = await post(budget)
+      } else {
+        console.warn(
+          `[llm] hosted chat 402 (credits): retry budget ${budget} unusable, declining`
+        )
+      }
+    }
 
     if (!response.ok) {
       // Drain/release the error body so the socket is not leaked.
       await response.arrayBuffer().catch(() => undefined)
+      console.warn(`[llm] hosted chat declined with status ${response.status}`)
       return null
     }
 
@@ -99,9 +127,13 @@ export async function hostedChatCompletion(
     const text = body?.choices?.[0]?.message?.content
     if (typeof text !== 'string' || text.length === 0) return null
     return text
-  } catch {
+  } catch (error) {
     // Network error, DNS failure, abort on timeout, body read error —
     // every failure mode declines instead of throwing.
+    console.warn(
+      '[llm] hosted chat unavailable, declining:',
+      (error as Error)?.message
+    )
     return null
   }
 }

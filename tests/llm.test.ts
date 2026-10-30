@@ -52,6 +52,7 @@ afterEach(() => {
     else process.env[key] = value
   }
   gateway.script = [] // any unconsumed scripted answers must not leak into the next spec
+  gateway.calls = [] // per-spec call log: absolute counts stay meaningful
 })
 
 // ------------------------------------------------------------ fake LLM gateway
@@ -267,6 +268,62 @@ describe('llm — hostedChatCompletion', () => {
     process.env.LLM_TIMEOUT_MS = '150'
     gateway.script = [{ content: 'late answer', delayMs: 1200 }]
     expect(await hostedChatCompletion([{ role: 'user', content: 'x' }])).toBeNull()
+    gateway.script = []
+  })
+
+  it('retries once at the affordable budget on a 402 "fewer max_tokens" answer', async () => {
+    process.env.OPENROUTER_API_KEY = 'or-test-key'
+    process.env.LLM_BASE_URL = gateway.url
+    // OpenRouter's free-credit pre-flight: the request reserves max_tokens
+    // worth of credit, so a key with ~nothing left rejects 800 even though
+    // the actual generation costs a fraction of it — and the remedy hint
+    // says exactly what to do.
+    gateway.script = [
+      {
+        status: 402,
+        body: {
+          error: {
+            message:
+              'This request requires more credits, or fewer max_tokens. You requested up to 800 tokens, but can only afford 300.',
+          },
+        },
+      },
+      { content: 'answered within the smaller budget' },
+    ]
+
+    const text = await hostedChatCompletion([{ role: 'user', content: 'x' }], {
+      maxTokens: 800,
+    })
+
+    expect(text).toBe('answered within the smaller budget')
+    expect(gateway.calls.length).toBe(2)
+    expect(gateway.calls[0]!.body.max_tokens).toBe(800)
+    expect(gateway.calls[1]!.body.max_tokens).toBe(300)
+    gateway.script = []
+  })
+
+  it('declines without a retry when the affordable budget is below the floor', async () => {
+    process.env.OPENROUTER_API_KEY = 'or-test-key'
+    process.env.LLM_BASE_URL = gateway.url
+    gateway.script = [
+      {
+        status: 402,
+        body: {
+          error: { message: 'You requested up to 800 tokens, but can only afford 12.' },
+        },
+      },
+    ]
+    expect(await hostedChatCompletion([{ role: 'user', content: 'x' }])).toBeNull()
+    expect(gateway.calls.length).toBe(1) // no second attempt — 12 tokens cannot carry a shot
+    gateway.script = []
+  })
+
+  it('declines without a retry on a 402 that carries no afford hint', async () => {
+    process.env.OPENROUTER_API_KEY = 'or-test-key'
+    process.env.LLM_BASE_URL = gateway.url
+    gateway.script = [{ status: 402, body: { error: { message: 'insufficient credits' } } }]
+    expect(await hostedChatCompletion([{ role: 'user', content: 'x' }])).toBeNull()
+    expect(gateway.calls.length).toBe(1)
     gateway.script = []
   })
 })
