@@ -67,3 +67,16 @@ alive, `dump-gateway.mjs <sandboxId>` extracts the running code first.
 
 ~$0.166/h while a sandbox is up. To pause the tier: delete the rotation cron
 job, then `node up.mjs --kill` in this directory.
+
+## Ops key lifecycle
+
+`TIER_OPS_KEY` is the rotator → ops-route bearer (constant-time compared in
+`src/lib/tier-gateway.ts`). If its value is ever lost, rotate it with:
+
+    # generate, PATCH into the Vercel project env, then push any commit to main
+    # (the project auto-deploys; runtime env is baked per deployment)
+    tops_<random hex>   ->   PATCH /v10/projects/{id}/env/{envId}
+
+Then write it into `rotate.env` and the private secrets-repo backup. Until the
+activating deploy is READY, rotate.mjs transparently uses the direct-Neon
+upsert path — no rotation is ever blocked on the key.
