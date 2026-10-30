@@ -451,3 +451,31 @@ export async function processQueuedJobs(
   }
   return queued.length
 }
+
+/**
+ * T14b — dispatch repair: queued jobs older than the grace window are
+ * re-driven through the render pipeline. A freshly created job is owned by
+ * its creation-time kick (kickPipeline → afterResponse/waitUntil); one that
+ * has sat `queued` past the window lost its dispatch (route bug, dropped
+ * waitUntil, cold-start race) — the sweep re-renders it so a charged job can
+ * never silently rot in the queue. Called fire-and-forget from the job read
+ * routes; the 60s window makes double-processing races effectively
+ * impossible (a kicked job leaves `queued` within its first invocation).
+ */
+export async function sweepStaleQueuedJobs(
+  staleMs = 60_000,
+  limit = 4,
+  opts: ProcessOptions = {}
+): Promise<number> {
+  const cutoff = new Date(Date.now() - staleMs)
+  const stale = await db.job.findMany({
+    where: { status: 'queued', updatedAt: { lt: cutoff } },
+    orderBy: { updatedAt: 'asc' },
+    take: limit,
+    select: { id: true },
+  })
+  for (const { id } of stale) {
+    await processJob(id, opts)
+  }
+  return stale.length
+}

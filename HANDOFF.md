@@ -1,10 +1,13 @@
 # Somnia — repo handoff instructions
 
-> **Current state (T14, render truth):** the honest-placeholder surface the
-> T13 note pointed at (wiring `FAL_KEY`/`SELFHOSTED_URL`) needs an
-> operator-side key that does not exist yet — so T14 shipped the OTHER half
-> of that honesty: the app now TELLS THE TRUTH about every simulated render,
-> and wiring a real tier became a documented 5-minute env job. What landed:
+> **Current state (T14, render truth + dispatch repair):** the
+> honest-placeholder surface the T13 note pointed at (wiring
+> `FAL_KEY`/`SELFHOSTED_URL`) needs an operator-side key that does not exist
+> yet — so T14 shipped the OTHER half of that honesty: the app now TELLS THE
+> TRUTH about every simulated render, wiring a real tier became a documented
+> 5-minute env job, and the production E2E that verified it all surfaced (and
+> fixed) a REAL pre-existing bug: extend/modify jobs were charged but never
+> dispatched. What landed:
 >
 > 1. **`Job.placeholderRender`** (schema, additive Boolean) — the render
 >    pipeline already knew when a frame degraded to the branded placeholder
@@ -37,14 +40,27 @@
 >    the next deploy), optionally `SOMNIA_MODEL_ROUTES`, redeploy, verify
 >    via `/api/providers/health`. The T12 routing/failover layer is built
 >    and waiting; going live is env work, not code.
+> 6. **T14b — dispatch repair (a REAL bug the production smoke caught):**
+>    `POST /api/jobs/:id/extend` and `/modify` created charged, queued jobs
+>    but never called `kickPipeline` — on production those dreams sat
+>    `queued` FOREVER with credits spent (no render, no refund). The hermetic
+>    suite missed it because tests drive `processJob` directly. Fixed twice
+>    over: both handlers now kick like generate/image, AND a self-healing
+>    sweep (`sweepStaleQueuedJobs` in pipeline.ts — queued jobs older than
+>    60s re-driven through the pipeline) fires after every job read route,
+>    so ANY future dispatch gap heals itself instead of rotting. The four
+>    stuck production jobs from before the fix healed via the sweep on the
+>    next authenticated job read.
 >
-> The suite is **350 specs green** (21 new: 13 in `tests/render-truth.test.ts`
+> The suite is **352 specs green** (23 new: 15 in `tests/render-truth.test.ts`
 > — flag semantics incl. mixed degradation + pinned/hosted exclusions, DTO
-> passthrough x3, hermetic probe + injected initializer + health DTO; 8 UI
-> specs across create/history/covers — the notice both variants, silence on
-> a hosted tier, the chip on cards/detail/share pages, no chip on real
-> renders). `tsc --noEmit` clean, `eslint .` zero errors (same 11
-> pre-existing warnings). Production DB column pushed pre-deploy.
+> passthrough x3, hermetic probe + injected initializer + health DTO, and the
+> stale-queue sweep contract; 8 UI specs across create/history/covers — the
+> notice both variants, silence on a hosted tier, the chip on
+> cards/detail/share pages, no chip on real renders). `tsc --noEmit` clean,
+> `eslint .` zero errors (same 11 pre-existing warnings). Production DB
+> column pushed pre-deploy; production smoke re-run clean after the dispatch
+> repair (extend/modify settle, every simulated surface flagged).
 > **Next (T15):** the moment an operator provides `FAL_KEY` or a GPU
 > gateway URL, wire it per the runbook, set `SOMNIA_MODEL_ROUTES`, and
 > smoke-verify a real hosted render end to end (health flip + hosted MP4

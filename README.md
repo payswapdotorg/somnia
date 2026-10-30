@@ -133,7 +133,7 @@ trial grant is 1,000 credits, no card required.
 ## Tests
 
 ```bash
-bun run test                # 350 specs: domain core, HTTP surface, render pipeline, UI contracts
+bun run test                # 352 specs: domain core, HTTP surface, render pipeline, UI contracts
 ```
 
 The suite runs against a **dedicated throwaway Neon project** — set

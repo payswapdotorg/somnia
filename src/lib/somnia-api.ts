@@ -50,7 +50,7 @@
 //   GET    providers/health        → provider health snapshot
 
 import { db } from '@/lib/db'
-import { processJob } from '@/lib/pipeline'
+import { processJob, sweepStaleQueuedJobs } from '@/lib/pipeline'
 import { afterResponse } from '@/lib/runtime'
 import {
   SESSION_COOKIE,
@@ -99,6 +99,21 @@ function kickPipeline(jobId: string): void {
   afterResponse(
     processJob(jobId).catch((error) => {
       console.error('[pipeline] background processing failed:', (error as Error)?.message)
+    })
+  )
+}
+
+/**
+ * T14b — dispatch repair sweep, fire-and-forget after job reads (never in
+ * tests). Re-drives queued jobs that lost their creation-time dispatch —
+ * a charged job can never silently rot in the queue. No-ops (one cheap
+ * query) when nothing is stale.
+ */
+function kickStaleSweep(): void {
+  if (process.env.SOMNIA_TEST) return
+  afterResponse(
+    sweepStaleQueuedJobs().catch((error) => {
+      console.error('[pipeline] stale-queue sweep failed:', (error as Error)?.message)
     })
   )
 }
@@ -403,6 +418,7 @@ async function getJobs(user: User, request: Request): Promise<Response> {
         assets: true,
       },
     })
+    kickStaleSweep()
     return json({ jobs })
   } catch (error) {
     return toErrorResponse(error)
@@ -415,6 +431,7 @@ async function getJobDetail(user: User, jobId: string): Promise<Response> {
     if (!job) {
       return json({ error: 'not_found', message: 'No such job' }, 404)
     }
+    kickStaleSweep()
     return json({ job })
   } catch (error) {
     return toErrorResponse(error)
@@ -425,6 +442,7 @@ async function postJobExtend(request: Request, user: User, jobId: string): Promi
   try {
     const job = await extendJob(user.id, jobId)
     const detail = await getJob(user.id, job.id)
+    kickPipeline(job.id) // T14b: queued jobs MUST be dispatched — charged, never rotting
     return json({ job: detail }, 201)
   } catch (error) {
     return toErrorResponse(error)
@@ -443,6 +461,7 @@ async function postJobModify(request: Request, user: User, jobId: string): Promi
       resolution: str(body.resolution),
     })
     const detail = await getJob(user.id, job.id)
+    kickPipeline(job.id) // T14b: queued jobs MUST be dispatched — charged, never rotting
     return json({ job: detail }, 201)
   } catch (error) {
     return toErrorResponse(error)

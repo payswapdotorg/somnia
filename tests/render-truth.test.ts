@@ -16,7 +16,7 @@ import sharp from 'sharp'
 import { db } from '@/lib/db'
 import { signup } from '@/lib/auth'
 import { createJob, getJob } from '@/lib/engine'
-import { processJob, imageSdkProbe, __resetImageSdkProbe, type FrameSource } from '@/lib/pipeline'
+import { processJob, imageSdkProbe, __resetImageSdkProbe, sweepStaleQueuedJobs, type FrameSource } from '@/lib/pipeline'
 import { shareJob, getSharedJob, listIdeas } from '@/lib/social'
 import { dispatchSomnia } from '@/lib/somnia-api'
 import type { HostedVideoProvider } from '@/lib/providers'
@@ -136,6 +136,8 @@ describe('pipeline — placeholderRender flag', () => {
     const user = await newUser()
     const job = await createJob({ userId: user.id, prompt: 'queued dream' })
     expect(job.placeholderRender).toBe(false)
+    // clean up so it cannot age into the sweep specs' stale window
+    await processJob(job.id, { frameSource: degradingSource(0) })
   })
 })
 
@@ -174,6 +176,42 @@ describe('render truth — DTOs', () => {
     const byPrompt = new Map(items.map((i) => [i.prompt, i.placeholderRender]))
     expect(byPrompt.get('real dream')).toBe(false)
     expect(byPrompt.get('simulated dream')).toBe(true)
+  })
+})
+
+// ------------------------------------------------- dispatch repair (T14b)
+
+describe('dispatch repair — stale-queue sweep', () => {
+  it('re-drives queued jobs older than the grace window to the pipeline', async () => {
+    const user = await newUser()
+    const fresh = await createJob({ userId: user.id, prompt: 'just created — kick owns it' })
+    const stale = await createJob({ userId: user.id, prompt: 'stuck in the queue forever' })
+    // age the stuck one past the sweep window (simulates a lost dispatch)
+    await db.job.update({
+      where: { id: stale.id },
+      data: { updatedAt: new Date(Date.now() - 120_000) },
+    })
+
+    const swept = await sweepStaleQueuedJobs(60_000, 4, { frameSource: degradingSource(0) })
+
+    expect(swept).toBe(1)
+    const sweptJob = await db.job.findUniqueOrThrow({ where: { id: stale.id } })
+    expect(sweptJob.status).toBe('completed')
+    expect(sweptJob.placeholderRender).toBe(true) // degrading source → simulated
+    // the fresh job is NOT double-processed by the sweep (its kick owns it)
+    const freshJob = await db.job.findUniqueOrThrow({ where: { id: fresh.id } })
+    expect(freshJob.status).toBe('queued')
+    // clean up: process it now so it cannot age into the next spec's window
+    await processJob(fresh.id, { frameSource: degradingSource(0) })
+  })
+
+  it('leaves freshly queued jobs alone — their creation-time kick owns them', async () => {
+    const user = await newUser()
+    const fresh = await createJob({ userId: user.id, prompt: 'fresh queued job' })
+    await sweepStaleQueuedJobs(60_000, 4, { frameSource: degradingSource(0) })
+    const after = await db.job.findUniqueOrThrow({ where: { id: fresh.id } })
+    expect(after.status).toBe('queued')
+    await processJob(fresh.id, { frameSource: degradingSource(0) })
   })
 })
 
