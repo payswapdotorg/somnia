@@ -1,36 +1,41 @@
 # Somnia — repo handoff instructions
 
-> **Current state (T9, board cover stills + OG imagery):** on top of the
-> T8 Insights surface, every card that represents a dream or a board now
-> carries a real image, and every public page ships honest OG imagery.
-> What landed:
+> **Current state (T10, durable storage — Neon Postgres):** on top of the T9
+> covers/OG tree, the database is now durable PostgreSQL on Neon. What
+> landed:
 >
-> 1. **The cover rule** (`src/lib/social.ts`, 8 specs) — a completed
->    dream's still is its poster asset (image dreams), else the middle
->    keyframe of its pinned timeline (video dreams — the most
->    representative frame). A board's cover is the newest completed
->    dream's still; boards with nothing completed get `null`, never a
->    fake. `listBoards` computes every cover in one extra flat query
->    (completed jobs newest-first, first still wins per board); the
->    public payloads expose per-job `posterPath` plus a board-level
->    `coverPath`.
-> 2. **Covers in the UI** — board cards render the still as a thumbnail
->    (honest alt text) with a branded night placeholder when empty; the
->    public board page and job share page pass `poster=` to every
->    `<video>` so previews land instantly.
-> 3. **OG imagery everywhere** — the share page pins the dream's still as
->    `og:image` / `twitter:image` (a real still beats the incomplete
->    player card: `summary_large_image` with the poster, player only when
->    there is a video but no still, text-only summary as the last
->    resort); the public board page pins the board cover the same way;
->    the landing ships a branded 1200x630 night card (`public/og.png`,
->    regenerated via `bun run scripts/make-og-image.ts` — sharp/librsvg,
->    deterministic, no AI imagery).
+> 1. **Provider migration** — `prisma/schema.prisma` switched
+>    `sqlite` → `postgresql` (+ `binaryTargets` native +
+>    `linux-musl-openssl-3.0.x` for the Vercel runtime). Zero model changes
+>    needed; the whole 275-spec suite passed unmodified against Postgres,
+>    which was the point of keeping Prisma between the app and the storage.
+> 2. **Neon wiring** — two projects provisioned via the console API:
+>    `somnia` (production, pooled runtime URL in `.env` / Vercel env) and
+>    `somnia-test` (the throwaway the Vitest suite truncates per file).
+>    `.env` carries `DATABASE_URL` (pooled, `pgbouncer=true&connection_limit=1`
+>    — serverless-safe), `DATABASE_URL_DIRECT` (one-off `prisma db push`) and
+>    `DATABASE_URL_TEST`. `.env.example` documents all three.
+> 3. **The SQLite era removed** — `src/lib/db.ts` lost the Phase 6
+>    seed-copy bootstrap (a missing `DATABASE_URL` now fails loudly);
+>    `prisma/seed.db` + `scripts/make-seed-db.ts` deleted;
+>    `next.config.ts` tracing drops the seed include; `tests/setup.ts`
+>    becomes: load `.env` → point at `DATABASE_URL_TEST` → `prisma db push`
+>    → `TRUNCATE ... CASCADE` every table between files (the Postgres
+>    equivalent of deleting the throwaway sqlite file). New
+>    `tests/db.test.ts` guards (3 specs): postgres URL pinned, the wire
+>    answers, a full Prisma roundtrip works.
+> 4. **Vercel** — the project env now carries the pooled Neon `DATABASE_URL`
+>    (set via the Vercel API before the code push, so the auto-deploy of
+>    this commit never ran against a missing database).
 >
-> The whole suite is **275 specs green** (13 new), `tsc --noEmit` clean,
-> `eslint .` zero errors (same 11 pre-existing unused-disable warnings).
-> **Next (T10):** durable storage (Turso/Neon) and blob media; multi-model
-> routing across hosted + self-hosted tiers.
+> The whole suite is **278 specs green** (3 new) — note it now runs against
+> a real remote database, so it is network-bound (chunk the run if your CI
+> times out: the heavyweight is `api.test.ts` at ~5 min).
+> `tsc --noEmit` clean, `eslint .` zero errors (same 11 pre-existing
+> unused-disable warnings).
+> **Next (T11):** blob media storage (media is still per-instance scratch
+> on serverless — S3/R2 or similar); multi-model routing across hosted +
+> self-hosted tiers.
 
 ---
 

@@ -2,14 +2,16 @@
 // Prisma schema: multi-user accounts + sessions, per-user credit ledger
 // (APPEND-ONLY by convention — never update or delete rows), generation job
 // pipeline with ordered keyframes (up to 16), boards, likes, API keys and
-// agent runs.
+// agent runs. Durable storage: PostgreSQL (Neon) since T10.
 
 generator client {
   provider = "prisma-client-js"
+  // native for local dev/test; linux-musl covers Vercel's serverless runtime
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 

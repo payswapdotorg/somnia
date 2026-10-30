@@ -115,10 +115,16 @@ Every endpoint ships behind the single catch-all `src/app/api/[[...path]]/route.
 
 ```bash
 bun install                 # or npm install
-cp .env.example .env        # set DATABASE_URL; add provider keys only when wiring real GPUs
-bunx prisma db push         # create the SQLite schema
+cp .env.example .env        # set DATABASE_URL (Postgres — e.g. a free Neon project)
+bunx prisma db push         # create the schema on your Postgres database
 bun run dev                 # http://localhost:3000
 ```
+
+Storage is durable PostgreSQL (Neon since T10): `DATABASE_URL` must be a
+`postgresql://…` connection string — the pooled Neon endpoint with
+`pgbouncer=true&connection_limit=1` is the serverless-safe form. The
+demo-ephemeral SQLite mode is gone; schema changes go through
+`bunx prisma db push` like any Prisma app.
 
 System requirement: `ffmpeg` (v6+) on PATH — the pipeline composites real MP4s
 with it (bundled `ffmpeg-static` is the fallback). Sign up in the browser: the
@@ -127,10 +133,13 @@ trial grant is 1,000 credits, no card required.
 ## Tests
 
 ```bash
-bun run test                # 256 specs: domain core, HTTP surface, render pipeline, UI contracts
+bun run test                # 278 specs: domain core, HTTP surface, render pipeline, UI contracts
 ```
 
-Domain (ledger, brainstorm, inputs, plans, economics), engine, social,
+The suite runs against a **dedicated throwaway Neon project** — set
+`DATABASE_URL_TEST` in `.env` (never point it at the production database;
+`tests/setup.ts` truncates every table between files). Domain (ledger,
+brainstorm, inputs, plans, economics), engine, social,
 apikeys, agents (+ LLM planner sanitizer), insights (the margin lens), auth,
 the full HTTP dispatcher, the ffmpeg pipeline (real MP4s), the hosted
 provider adapters (against a scripted local HTTP gateway), and jsdom
@@ -169,10 +178,11 @@ local gateway).
 
 ## Serverless notes (Vercel)
 
-`DATABASE_URL=file:/tmp/somnia.db` on Vercel; `src/lib/db.ts` copies the
-committed schema-only seed (`prisma/seed.db`, regenerated via
-`bun run scripts/make-seed-db.ts` after schema changes) on cold start.
-Demo storage is ephemeral per-instance by design — point `DATABASE_URL` at
-Turso/Neon/Postgres for durable data. Mutating routes export
-`maxDuration = 60`; generation runs through `afterResponse`/`waitUntil`.
-Set `NEXT_PUBLIC_SITE_URL` for absolute OpenGraph URLs on share pages.
+`DATABASE_URL` is the pooled Neon connection string (serverless-safe:
+`-pooler` host + `pgbouncer=true&connection_limit=1`) — storage is durable
+Postgres, shared by every function instance, so a job created by
+`POST /api/generate` is immediately visible to `GET /api/jobs`. Mutating
+routes export `maxDuration = 60`; generation runs through
+`afterResponse`/`waitUntil`. Set `NEXT_PUBLIC_SITE_URL` for absolute
+OpenGraph URLs on share pages. (The pre-T10 per-instance SQLite seed
+bootstrap is gone with the Postgres migration.)

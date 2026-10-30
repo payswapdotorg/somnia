@@ -16,9 +16,10 @@ const nextConfig: NextConfig = {
   //     static file matches. Locally the static files exist and are served
   //     directly (byte-for-byte the old behavior); on serverless, runtime-
   //     written media streams from the writable scratch dir with Range support.
-  //   - outputFileTracingIncludes: the committed SQLite seed schema
-  //     (prisma/seed.db) and the ffmpeg-static binary must travel with the
-  //     serverless bundle — they are plain files the tracer cannot see.
+  //   - outputFileTracingIncludes: the ffmpeg-static binary must travel
+  //     with the serverless bundle — it is a plain file the tracer cannot
+  //     see. (The Phase 6 SQLite seed.db include is gone with T10's Postgres
+  //     migration — the durable schema now lives on Neon.)
   //   - serverExternalPackages: keep Prisma's query engine AND the ffmpeg-static
   //     binary package external so they are required natively at runtime —
   //     bundling ffmpeg-static virtualizes __dirname and breaks its internal
@@ -34,8 +35,7 @@ const nextConfig: NextConfig = {
     };
   },
   outputFileTracingIncludes: {
-    "/api/**": ["./prisma/seed.db", "./node_modules/ffmpeg-static/**"],
-    "/share/**": ["./prisma/seed.db"],
+    "/api/**": ["./node_modules/ffmpeg-static/**"],
   },
   serverExternalPackages: ["@prisma/client", "prisma", "ffmpeg-static"],
 };

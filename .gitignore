@@ -9,12 +9,10 @@ out/
 build/
 next-env.d.ts
 
-# database (runtime artifact)
+# database artifacts (sqlite-era leftovers; the durable DB lives on Neon)
 db/
 *.db
 *.db-journal
-# committed serverless seed schema (Phase 6) — despite the *.db rule above
-!prisma/seed.db
 
 # env
 .env
