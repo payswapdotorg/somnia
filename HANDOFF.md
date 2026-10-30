@@ -1,6 +1,97 @@
 # Somnia — repo handoff instructions
 
-> **Current state (T15, the live video tier):** production renders REAL
+> **Current state (T16, the durable live tier):** the live tier no longer
+> lapses. T15's rotation re-wrote the Vercel env and redeployed every hour
+> (~2min downtime); T16 moved the gateway endpoint into the DATABASE and
+> prism stills onto the gateway. What landed:
+>
+> 1. **The stable-URL relay (repo, TDD)** — a new `TierGateway` singleton
+>    row holds the live gateway `url`/`apiKey`/`model`/`sandboxId`;
+>    `SELFHOSTED_URL` now points FOREVER at the app's own
+>    `/api/tier/relay/*` route (`src/lib/tier-gateway.ts`), which forwards
+>    GET/POST to the row URL with the row's key (constant-time bearer on the
+>    way in = the stable `SELFHOSTED_API_KEY`; `/v1/*` + `/healthz`
+>    allowlist; honest 503 no-row / 502 unreachable). The relay re-reads the
+>    row per request, so an atomic upsert switches in-flight render polls to
+>    a fresh sandbox mid-render. Adapters stay pure HTTP — they never touch
+>    the DB (the app layer owns that), byte-for-byte unchanged.
+> 2. **The ops surface (repo, TDD)** — `GET/POST/DELETE /api/ops/gateway`
+>    (bearer `TIER_OPS_KEY`, 503 when unconfigured, constant-time compare)
+>    reads the masked state (the apiKey VALUE is never returned), upserts
+>    the row (the rotation step), and clears it (tier down → renders fail
+>    and refund honestly).
+> 3. **Health truth (repo, TDD)** — `tierGatewayConfigured` /
+>    `tierGatewayAlive` (a 2.5s probe — a row can outlive its dead sandbox,
+>    and health says which) / `tierGatewayRotatedAt` + `imageModelRoutes`
+>    (`{"prism":"selfhosted"}`). URL and key never leave the server.
+> 4. **Prism stills through the gateway (repo, TDD)** — the last placeholder
+>    surface is gone: the self-hosted adapter gained `renderStill`
+>    (`POST/GET /v1/image/jobs`, same submit-retry + poll-tolerance
+>    semantics), image routing (`failoverImageOrder` — fal is not
+>    image-capable and never joins the chain), and the pipeline's image
+>    branch renders through hosted tiers with the VIDEO contract: a routed
+>    still that fails on every tier fails and refunds — NEVER silent local
+>    placeholder art; hosted stills are never placeholder-flagged. The
+>    gateway (ops) composites stills: pinned frame verbatim or generated
+>    a0.dev imagery, scaled/cropped to the canvas, PNG.
+> 5. **Zero-downtime rotation (ops, `scripts/e2b/` on the dev box)** —
+>    `rotate.mjs` rewritten: fresh sandbox (old one still serving) → full
+>    contract self-test (prompt-only video, pinned timeline, generated
+>    still, pinned still, auth) → ONE upsert to `/api/ops/gateway` (the
+>    atomic switch) → verify through the app's OWN relay + health → kill the
+>    old sandbox. ~50s end to end, ZERO downtime, zero Vercel env changes,
+>    zero redeploys. Stable secrets live in `rotate.env` (chmod 600,
+>    outside the repo): `RELAY_KEY` (= Vercel `SELFHOSTED_API_KEY`),
+>    `OPS_KEY` (= Vercel `TIER_OPS_KEY`) — they NEVER rotate.
+>    `wire-t16.mjs` was the one-time env flip (relay URL + stable keys) +
+>    one deploy; rotations never touch Vercel again.
+> 6. **The rotation cron** — a scheduler fires `rotate.mjs` every ~45min
+>    (at :00 and :45, Africa/Accra) so the tier is durable under the E2B
+>    1h session cap. Honest costs: the sandbox bills ~$0.166/h while up
+>    (~$4/day at 24/7); pause any time (delete the cron job +
+>    `node up.mjs --kill` — renders then fail-and-refund honestly until the
+>    next rotation).
+> 7. **Production wiring (T10/T13/T14 pattern)** — the `TierGateway` table
+>    was pushed to production Neon BEFORE the code push (additive); env
+>    flipped once (wire-t16) + one deploy; then the first rotation landed
+>    the row. **Smoke-verified on production (48/48, `scripts/t16-smoke.mjs`
+>    outside the repo)**: health reports `tierGatewayConfigured/Alive: true`
+>    with `imageModelRoutes {"prism":"selfhosted"}`; the relay answers
+>    `/healthz` with the relay key (401 without); a prompt-only dream
+>    renders a REAL hosted MP4 in ~34s THROUGH THE RELAY ($0.002 cost stamp,
+>    blob URL, 3 gateway keyframes); a prism IMAGE job renders a REAL hosted
+>    still in ~16s ($0.0005, PNG blob poster, `placeholderRender: false`);
+>    the pinned-timeline path composites the user's 3 keyframes; extend
+>    settles; BOTH share pages carry no simulated-render badge; insights
+>    reports the selfhosted tier; Range 206 off the CDN.
+>
+> The suite is **384 specs green** (29 new: 21 in `tests/tier-gateway.test.ts`
+> — row state/upsert validation, relay forwarding + auth + 405/404/503/502 +
+> dispatch integration, ops surface + masking, health truth incl. the
+> dead-sandbox case; 4 image-rendering specs in `tests/providers.test.ts` —
+> hosted still + cost stamp + poster pixels, pinned source frame, fail+refund
+> with no local fallback, local path when unconfigured; 4 image-routing
+> specs in `tests/routing.test.ts`; the T6a "image jobs never route hosted"
+> spec updated to the T16 contract). `tsc --noEmit` clean, `eslint .` zero
+> errors (same 11 pre-existing warnings). The suite is network-bound against
+> the Neon test DB — chunk the run (~5 files per invocation).
+> **Known constraints, honestly:** E2B still caps sessions at 1h — the tier
+> is durable only while the ~45min rotation cron runs (a rotation gap shows
+> up as `tierGatewayAlive: false` and fail+refund renders); the sandbox
+> bills ~$0.166/h while up; keyless imagery latency varies 3-90s per render
+> (stills ~15s); a rotation that lands mid-render switches that render's
+> polls to the new sandbox, where the job id is unknown → such renders fail
+> and refund (rare: ~50s rotations vs ~45min cadence).
+> **Next (T17):** the tier is feature-complete for the current keys —
+> candidates: a real GPU/fal key swaps the imagery source in `gateway.mjs`
+> (the contract, routing and failover already speak it); Insights could
+> surface `tierGatewayRotatedAt`/uptime for the operator; the cron could
+> quiet-hours the sandbox to cut idle spend; or move on to product surface
+> (boards/agent UX polish).
+
+---
+
+> **Prior state (T15, the live video tier):** production renders REAL
 > hosted video today. The T14 runbook needed an operator key that did not
 > exist (`FAL_KEY` / a GPU gateway); T15 stood the tier up with what the
 > operator DOES have — an E2B sandbox. What landed:

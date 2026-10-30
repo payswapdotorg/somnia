@@ -217,12 +217,18 @@ work on the Vercel project, not code:
 That's the whole surface: `activeProvider: demo` in health is the only
 remaining honest-placeholder line, and the UI around it tells the truth.
 
+T16 note: `SELFHOSTED_URL` may point at the app's OWN `/api/tier/relay`
+route instead of a gateway directly — the live endpoint is then the
+`TierGateway` DB row (upserted via `POST /api/ops/gateway`, bearer
+`TIER_OPS_KEY`), which is how the E2B tier above rotates sandboxes without
+touching the Vercel env. Adapters stay pure HTTP either way.
+
 Adapters are pure HTTP + download — the pipeline owns every database write,
 so hosted and local renders share identical ledger, refund and asset
 semantics (pinned by `tests/providers.test.ts`, 17 specs against a scripted
 local gateway).
 
-### The live tier (T15): an E2B render gateway
+### The live tier (T15/T16): an E2B render gateway behind a stable relay
 
 Production runs a REAL self-hosted tier today — not a rented GPU box, and it
 says so honestly:
@@ -234,27 +240,36 @@ says so honestly:
   the same storyboard beats the local pipeline uses. Composite: ffmpeg Ken
   Burns — the exact `src/lib/video.ts` semantics (alternating zoom, 2×
   working buffer, crossfade chain, H.264 yuv420p faststart, resolution CRF).
-  A job whose imagery cannot be produced FAILS — placeholder art never poses
-  as a hosted render, so `placeholderRender` stays false only for genuinely
-  real renders.
+  T16: the gateway ALSO serves the `/v1/image/jobs` still contract — prism
+  jobs route through it, so there is no longer ANY placeholder surface on
+  production. A job whose imagery cannot be produced FAILS — placeholder art
+  never poses as a hosted render, so `placeholderRender` stays false only
+  for genuinely real renders.
 - **Economics** — E2B bills ~$0.166/hour of sandbox uptime (2 vCPU);
   `SOMNIA_PROVIDER_COSTS` pins the marginal per-render cost at
   `pulse-3/pulse-flash`: $0.002 (540p/720p) / $0.003 (1080p), prism stills
   $0.0005. The sandbox also burns uptime while idle — `node up.mjs --kill`
-  stops the meter; renders then fail-and-refund honestly until it is back.
-- **Lifecycle** — **the E2B Hobby plan caps sandbox sessions at one hour**
-  (a 24h `setTimeout` is accepted by the API but silently clamped — verified
-  live). While the gateway is down renders fail and refund honestly;
-  `node rotate.mjs` brings the whole tier back in ~2 minutes (fresh sandbox
-  + self-test + Vercel env re-wire + redeploy + health verify). `up.mjs`
-  alone reuses a live gateway or creates one; `--redeploy` hot-swaps gateway
-  code; `--selftest` re-proves the contract; `--kill` stops the uptime meter.
-  Durable 24/7 operation needs the T16 relay (stable URL from a DB row) or a
-  plan/host without the session cap.
+  stops the meter; renders then fail-and-refund honestly until it is back
+  (`DELETE /api/ops/gateway` marks the tier down the same way).
+- **Lifecycle (T16: durable)** — the E2B Hobby plan caps sandbox sessions at
+  ONE HOUR, but the gateway endpoint lives in the `TierGateway` DB row, not
+  the env: `SELFHOSTED_URL` points FOREVER at the app's own stable relay
+  (`/api/tier/relay/*`, bearer = `SELFHOSTED_API_KEY`), which forwards to
+  whatever URL the row holds. A rotation is therefore `node rotate.mjs` —
+  fresh sandbox + full contract self-test + ONE upsert to
+  `POST /api/ops/gateway` (bearer = `TIER_OPS_KEY`) + kill the old sandbox:
+  ~50s, ZERO downtime (in-flight polls re-read the row and follow the new
+  sandbox), zero Vercel env changes, zero redeploys. A scheduler runs it
+  every ~45min; `up.mjs --redeploy` hot-swaps gateway code; `--selftest`
+  re-proves the contract; `--kill` stops the uptime meter.
+- **Health truth** — `GET /api/providers/health` reports
+  `tierGatewayConfigured` (a row exists), `tierGatewayAlive` (a 2.5s probe
+  actually reached the sandbox — a row can outlive its dead sandbox) and
+  `tierGatewayRotatedAt` (the last rotation). URL and key are never exposed.
 - **Latency** — a 5s 540p render takes 10–90s wall (the keyless image
-  endpoint's generation time dominates and varies); the API function runs at
-  `maxDuration = 300` so every render settles inside its invocation, and the
-  gateway enforces a 240s hard deadline under it.
+  endpoint's generation time dominates and varies); prism stills ~15s. The
+  API function runs at `maxDuration = 300` so every render settles inside
+  its invocation, and the gateway enforces a 240s hard deadline under it.
 
 ## Serverless notes (Vercel)
 
