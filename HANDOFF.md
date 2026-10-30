@@ -24,9 +24,15 @@
 >    equivalent of deleting the throwaway sqlite file). New
 >    `tests/db.test.ts` guards (3 specs): postgres URL pinned, the wire
 >    answers, a full Prisma roundtrip works.
-> 4. **Vercel** — the project env now carries the pooled Neon `DATABASE_URL`
->    (set via the Vercel API before the code push, so the auto-deploy of
->    this commit never ran against a missing database).
+> 4. **Vercel** — the `somnia` project was created via the API and linked to
+>    this repo (production branch `main`, auto-deploy). Its env carries the
+>    pooled Neon `DATABASE_URL` (encrypted) plus
+>    `NEXT_PUBLIC_SITE_URL=https://somnia-bay.vercel.app` (absolute OG URLs) —
+>    both set BEFORE the provider-switch push, so no deploy ever booted
+>    against a missing database. Smoke-verified end-to-end: a signup on the
+>    live deployment wrote a user row readable through a direct Neon
+>    connection from a different machine — the cross-instance durability
+>    T10 exists to deliver.
 >
 > The whole suite is **278 specs green** (3 new) — note it now runs against
 > a real remote database, so it is network-bound (chunk the run if your CI
