@@ -25,6 +25,7 @@ import {
   type RemixPrefill,
   type ProviderHealthSummaryView,
 } from '@/components/somnia/dto'
+import type { BrainstormVariant } from '@/lib/brainstorm'
 import {
   ASPECT_RATIOS,
   DURATIONS,
@@ -66,7 +67,11 @@ export function CreateApp({ user, prefill, onCreditsChanged }: CreateAppProps) {
   const [pins, setPins] = useState<PinnedFrame[]>([])
   const [boards, setBoards] = useState<{ id: string; name: string }[]>([])
   const [boardId, setBoardId] = useState('')
-  const [variants, setVariants] = useState<string[]>([])
+  // T18: /api/brainstorm returns variant OBJECTS ({style,label,text,blurb}) —
+  // the earlier string[] typing silently shipped objects into React children
+  // and crashed the whole app on Enhance. The shape now mirrors the server's
+  // BrainstormVariant exactly.
+  const [variants, setVariants] = useState<BrainstormVariant[]>([])
   const [enhancing, setEnhancing] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -220,8 +225,16 @@ export function CreateApp({ user, prefill, onCreditsChanged }: CreateAppProps) {
         credentials: 'same-origin',
         body: JSON.stringify({ prompt: source }),
       })
-      const body = (await res.json().catch(() => null)) as { variants?: string[] } | null
-      if (res.ok && body?.variants?.length) setVariants(body.variants)
+      const body = (await res.json().catch(() => null)) as
+        | { variants?: BrainstormVariant[] }
+        | null
+      // belt-and-suspenders: only adopt variants carrying a usable text — a
+      // contract drift degrades to "no variants", never to a client crash.
+      const safe = (body?.variants ?? []).filter(
+        (v): v is BrainstormVariant =>
+          !!v && typeof v.text === 'string' && v.text.trim().length > 0
+      )
+      if (res.ok && safe.length > 0) setVariants(safe)
       else setError('No variants came back — try rephrasing the idea.')
     } catch {
       setError('Network error while enhancing — please try again.')
@@ -230,9 +243,9 @@ export function CreateApp({ user, prefill, onCreditsChanged }: CreateAppProps) {
     }
   }
 
-  function applyVariant(variant: string) {
-    setPrompt(variant)
-    setEnhancedPrompt(variant)
+  function applyVariant(text: string) {
+    setPrompt(text)
+    setEnhancedPrompt(text)
     setVariants([])
   }
 
@@ -416,15 +429,19 @@ export function CreateApp({ user, prefill, onCreditsChanged }: CreateAppProps) {
           {variants.length > 0 && (
             <div className="space-y-2 rounded-xl border border-border/60 bg-card/95 p-3 shadow-lg shadow-black/20 backdrop-blur">
               <p className="text-xs font-medium text-muted-foreground">Variants — tap one to adopt it</p>
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-col gap-2">
                 {variants.map((variant) => (
                   <button
-                    key={variant}
+                    key={variant.style}
                     type="button"
-                    onClick={() => applyVariant(variant)}
-                    className="rounded-full border border-primary/40 bg-primary/10 px-3 py-1 text-xs text-foreground transition hover:bg-primary/20"
+                    onClick={() => applyVariant(variant.text)}
+                    title={variant.blurb}
+                    className="flex flex-col items-start gap-0.5 rounded-lg border border-primary/40 bg-primary/10 px-3 py-1.5 text-left transition hover:bg-primary/20"
                   >
-                    {variant}
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-primary">
+                      {variant.label}
+                    </span>
+                    <span className="text-xs text-foreground">{variant.text}</span>
                   </button>
                 ))}
               </div>

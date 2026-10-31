@@ -294,7 +294,25 @@ describe('CreateApp — composer contract', () => {
         status: 200,
         body: (init?: RequestInit) => {
           expect(JSON.parse(String(init?.body))).toEqual({ prompt: 'tide pool' })
-          return { variants: ['a neon jellyfish bloom in the tide pool', 'moonlit anemones'] }
+          // T18: the REAL contract — suggestBrainstorms returns variant objects
+          // {style,label,text,blurb}, never bare strings (mock drift crashed
+          // the live app before this shape was pinned here).
+          return {
+            variants: [
+              {
+                style: 'cinematic',
+                label: 'Cinematic',
+                text: 'a neon jellyfish bloom in the tide pool',
+                blurb: 'Camera-first storytelling — lens, light and mood choreographed for film feel.',
+              },
+              {
+                style: 'vivid',
+                label: 'Vivid',
+                text: 'moonlit anemones',
+                blurb: 'Saturated color and bold contrast, composed for maximum visual impact.',
+              },
+            ],
+          }
         },
       },
       '/api/generate': {

@@ -55,9 +55,13 @@ export async function listBoards(userId: string): Promise<BoardSummary[]> {
       where: { userId },
       orderBy: { createdAt: 'asc' },
     }),
+    // T18: count only COMPLETED dreams — a failed render refunds its credits
+    // and produces nothing, so it must not inflate a board's dream count
+    // (the cover logic below already filters to completed; the counts now
+    // agree with it, and with the public /boards/<token> view).
     db.job.groupBy({
       by: ['boardId'],
-      where: { userId },
+      where: { userId, status: 'completed' },
       _count: { _all: true },
     }),
     // the caller's completed, still-filed dreams, newest first — one walk

@@ -57,6 +57,9 @@ describe('social — boards', () => {
     const board = await createBoard(user.id, { name: 'Night Market' })
     expect(board.name).toBe('Night Market')
     await seedJob(user.id, { boardId: board.id })
+    // T18: a failed render refunds and produces nothing — it must not count
+    // as a dream on the board (agree with the cover + public board views).
+    await seedJob(user.id, { boardId: board.id, status: 'failed', progress: 0 })
     const boards = await listBoards(user.id)
     expect(boards).toHaveLength(1)
     expect(boards[0].jobCount).toBe(1)
