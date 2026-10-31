@@ -65,14 +65,12 @@ export function HistoryApp({ user }: HistoryAppProps) {
       return
     }
     void refresh()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user])
 
   useEffect(() => {
     if (!user || !hasPending) return
     const timer = setInterval(() => void refresh(), 2500)
     return () => clearInterval(timer)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, hasPending])
 
   function patchJob(id: string, patch: Partial<JobView>) {
@@ -270,7 +268,6 @@ export function HistoryApp({ user }: HistoryAppProps) {
                   className="size-full object-contain"
                 />
               ) : render ? (
-                // eslint-disable-next-line @next/next/no-img-element
                 <img src={render.path} alt={selected.prompt} className="size-full object-contain" />
               ) : (
                 <div className="flex size-full items-center justify-center text-sm text-muted-foreground">
@@ -300,7 +297,6 @@ export function HistoryApp({ user }: HistoryAppProps) {
               </p>
               <div data-testid="keyframe-strip" className="flex gap-2 overflow-x-auto pb-1">
                 {selected.keyframes.map((kf) => (
-                  // eslint-disable-next-line @next/next/no-img-element
                   <img
                     key={kf.id}
                     src={kf.path}

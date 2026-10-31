@@ -120,7 +120,6 @@ export function AgentsApp({ user, onCreditsChanged }: AgentsAppProps) {
       alive = false
       clearInterval(timer)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [run?.id, dispatched, settled])
 
   if (!user) {

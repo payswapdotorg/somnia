@@ -96,7 +96,6 @@ export function CreateApp({ user, prefill, onCreditsChanged }: CreateAppProps) {
     if (typeof prefill.durationSec === 'number') setDurationSec(prefill.durationSec)
     setHdr(!!prefill.hdr)
     setLoop(!!prefill.loop)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prefill])
 
   // ------------------------------------------------------------- boards
@@ -166,7 +165,6 @@ export function CreateApp({ user, prefill, onCreditsChanged }: CreateAppProps) {
       return
     }
     void refreshFeed()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user])
 
   const feedPending =
@@ -177,7 +175,6 @@ export function CreateApp({ user, prefill, onCreditsChanged }: CreateAppProps) {
     if (!user || !feedPending) return
     const timer = setInterval(() => void refreshFeed(), 2500)
     return () => clearInterval(timer)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, feedPending])
 
   // Carry a remix prefill's closing frame forward as the opening pin. The
@@ -364,7 +361,6 @@ export function CreateApp({ user, prefill, onCreditsChanged }: CreateAppProps) {
   // A finished active job lands in the feed for good measure.
   useEffect(() => {
     if (activeJob && TERMINAL_STATUSES.includes(activeJob.status)) void refreshFeed()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeJob?.status])
 
   // ------------------------------------------------------------- render
@@ -556,7 +552,7 @@ export function CreateApp({ user, prefill, onCreditsChanged }: CreateAppProps) {
                           key={`${pin.name ?? 'pin'}-${i}`}
                           className="group relative overflow-hidden rounded-lg border border-border/60"
                         >
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          { }
                           <img src={pin.dataUrl} alt={`Keyframe ${i + 1}`} className="size-10 object-cover" />
                           <button
                             type="button"
@@ -683,7 +679,6 @@ function FeedCard({ job, featured, user }: { job: JobView; featured?: boolean; u
             className="size-full object-cover"
           />
         ) : render ? (
-          // eslint-disable-next-line @next/next/no-img-element
           <img
             data-testid={featured ? 'rendered-still' : undefined}
             src={render.path}

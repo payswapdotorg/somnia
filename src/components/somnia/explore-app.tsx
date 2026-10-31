@@ -51,7 +51,6 @@ export function ExploreApp({ viewer }: ExploreAppProps) {
 
   useEffect(() => {
     void loadPage(0, false)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   async function toggleLike(item: FeedItemView) {

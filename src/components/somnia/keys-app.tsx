@@ -50,7 +50,6 @@ export function KeysApp({ user }: KeysAppProps) {
       return
     }
     void refresh()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user])
 
   async function mintKey(event: React.FormEvent) {

@@ -45,7 +45,6 @@ export function BoardsApp({ user }: BoardsAppProps) {
       return
     }
     void refresh()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user])
 
   async function createBoard(event: React.FormEvent) {
