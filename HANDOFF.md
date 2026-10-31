@@ -713,3 +713,29 @@ What works out of the box on Vercel and what needs a key:
 - **Image-to-video (Phase 10)**: the composer's Start/End frame pins are
   provider-agnostic — the demo engine stitches pinned frames into the Ken
   Burns chain; the fal adapter maps them to `image_url`/`end_image_url`.
+
+## T17 addendum — Dream-Machine app parity (the product layout)
+
+The product now clones the app.lumalabs.ai layout; before T17 the app was a
+top-bar admin frame. Shipped in `b7a1daf` (3 files, contract byte-compatible):
+
+- **`app-shell.tsx`** — slim left icon rail (logo → Create/Explore/History/
+  Boards/Agents → API keys/Plans/Insights → avatar = sign out with credits
+  tooltip); fluid full-bleed `<main>` each page owns; compact icon top bar
+  below `md`.
+- **`create-app.tsx`** — the home is now a full-bleed masonry feed of your
+  generations (`GET /api/jobs`, 2.5 s live polling while anything is in
+  flight, just-submitted job featured with `rendered-video`) under the
+  signature floating bottom prompt dock: pill input ("What will you dream
+  today?", Enter submits / Shift+Enter newlines), recipe tray (mode, model,
+  resolution, duration, aspect chips, HDR/Loop, 16-keyframe pins, board),
+  Enhance, circular Dream-it submit. Variants, errors and the demo-tier
+  notice stack above the dock.
+- **`screens.tsx`** — create goes full-bleed; every other page owns its
+  gutters via `PageWrap` (max-w-6xl).
+
+Verified on production: 384/384 specs green, `tsc` clean, `next build`
+clean; signed up a fresh account on somnia-bay.vercel.app, dreamed 5 clips
+from the dock (all completed through the live E2B tier into Vercel Blob),
+VLM parity review of the rendered home scored 9/10 vs the Dream-Machine
+language (rail + masonry + dock + dark/orange accents all confirmed).
