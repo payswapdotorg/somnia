@@ -1,17 +1,19 @@
-// src/components/somnia/create-app.tsx — the cockpit composer (T4b).
+// src/components/somnia/create-app.tsx — the home: feed + prompt dock (T4b, T17).
 //
-// The primary creation surface: video and prism image modes, brainstorm
-// variants, the full recipe (model x resolution x aspect x duration x HDR x
-// loop), up to 16 pinned keyframes, board filing, an honest cost preview
-// computed with the same plans.ts math the server charges by, and live
-// polling of the accepted job through the render pipeline to the finished
-// clip. Talks the exact /api/{boards,brainstorm,generate,image,jobs/:id}
-// contract.
+// The Dream-Machine layout: a full-bleed masonry feed of your generations
+// (GET /api/jobs, live polling while anything is in flight, the just-sumitted
+// job featured at the top) with the signature floating prompt dock at the
+// bottom — a pill input carrying the full recipe (mode, model, resolution,
+// aspect, duration, HDR, loop), up to 16 pinned keyframes, board filing,
+// brainstorm variants, an honest cost preview computed with the same plans.ts
+// math the server charges by, and live polling of the accepted job through
+// the render pipeline. Talks the exact /api/{boards,brainstorm,generate,image,
+// jobs,jobs/:id} contract.
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
-import { Button } from '@/components/ui/button'
+import { ArrowUp, Wand2, SlidersHorizontal, Paperclip } from 'lucide-react'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { SignInInvitation, StatusChip, MetaChip, AvatarBlob } from '@/components/somnia/bits'
@@ -72,6 +74,9 @@ export function CreateApp({ user, prefill, onCreditsChanged }: CreateAppProps) {
   // T14 render truth — the provider tier this deployment renders on, fetched
   // once so the composer can tell the user what a "dream" actually is here.
   const [health, setHealth] = useState<ProviderHealthSummaryView | null>(null)
+  // T17 feed — my generations, live while anything is in flight.
+  const [feed, setFeed] = useState<JobView[]>([])
+  const [feedLoading, setFeedLoading] = useState(true)
   const fileInput = useRef<HTMLInputElement>(null)
 
   // Apply a remix prefill that arrives after mount (the history surface
@@ -135,6 +140,40 @@ export function CreateApp({ user, prefill, onCreditsChanged }: CreateAppProps) {
       alive = false
     }
   }, [user])
+
+  // --------------------------------------------------------------- feed
+  async function refreshFeed(): Promise<void> {
+    try {
+      const res = await fetch('/api/jobs', { credentials: 'same-origin' })
+      if (!res.ok) return
+      const body = (await res.json()) as { jobs: JobView[] }
+      setFeed(body.jobs)
+    } catch {
+      // transient — polling retries
+    } finally {
+      setFeedLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (!user) {
+      setFeedLoading(false)
+      return
+    }
+    void refreshFeed()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user])
+
+  const feedPending =
+    feed.some((j) => !TERMINAL_STATUSES.includes(j.status)) ||
+    (activeJob !== null && !TERMINAL_STATUSES.includes(activeJob.status))
+
+  useEffect(() => {
+    if (!user || !feedPending) return
+    const timer = setInterval(() => void refreshFeed(), 2500)
+    return () => clearInterval(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, feedPending])
 
   // Carry a remix prefill's closing frame forward as the opening pin. The
   // source path is public-only-if-guessable media; failure is non-fatal.
@@ -225,8 +264,8 @@ export function CreateApp({ user, prefill, onCreditsChanged }: CreateAppProps) {
   }
 
   // -------------------------------------------------------------- submit
-  async function submit(event: React.FormEvent) {
-    event.preventDefault()
+  async function submit(event?: React.FormEvent) {
+    event?.preventDefault()
     setError(null)
     const trimmed = prompt.trim()
     if (trimmed.length < 3) {
@@ -271,6 +310,7 @@ export function CreateApp({ user, prefill, onCreditsChanged }: CreateAppProps) {
       if (res.ok && payload && 'job' in payload) {
         setActiveJob(payload.job)
         setVariants([])
+        void refreshFeed()
         onCreditsChanged?.()
         return
       }
@@ -308,322 +348,382 @@ export function CreateApp({ user, prefill, onCreditsChanged }: CreateAppProps) {
     }
   }, [activeJob?.id, activeJob?.status])
 
+  // A finished active job lands in the feed for good measure.
+  useEffect(() => {
+    if (activeJob && TERMINAL_STATUSES.includes(activeJob.status)) void refreshFeed()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeJob?.status])
+
   // ------------------------------------------------------------- render
   if (!user) {
     return (
-      <div className="py-16">
+      <div className="px-4 py-16">
         <SignInInvitation what="start dreaming" />
       </div>
     )
   }
 
-  const render = activeJob ? mainAsset(activeJob) : null
+  const feedJobs = feed.filter((j) => j.id !== activeJob?.id)
+  const empty = feedLoading === false && feedJobs.length === 0 && !activeJob
 
   return (
-    <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_360px]">
-      {/* ---------------------------------------------------- composer */}
-      <form onSubmit={submit} className="space-y-6">
-        <div className="flex gap-2" role="group" aria-label="Creation mode">
-          {(['video', 'image'] as const).map((m) => (
-            <button
-              key={m}
-              type="button"
-              onClick={() => setMode(m)}
-              aria-pressed={mode === m}
-              className={`rounded-lg px-4 py-1.5 text-sm font-medium capitalize transition ${
-                mode === m
-                  ? 'bg-primary text-primary-foreground'
-                  : 'border border-border/60 text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              {m}
-            </button>
-          ))}
-        </div>
+    <div className="relative min-h-screen">
+      {/* --------------------------------------------------------- feed */}
+      <div className="px-4 pt-4 pb-64 md:px-6">
+        {prefill && (
+          <p className="mb-4 rounded-lg border border-primary/30 bg-primary/10 px-4 py-2 text-sm text-primary">
+            Remix loaded into the dock — adjust the recipe and dream it yourself. Nothing is charged until you submit.
+          </p>
+        )}
 
-        <div className="space-y-2">
-          <Label htmlFor="dream-prompt">Prompt</Label>
-          <Textarea
-            id="dream-prompt"
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            placeholder={
-              mode === 'video'
-                ? 'Describe the dream — a paper boat drifting through neon canals…'
-                : 'Describe the still — chrome dunes under a violet dusk…'
-            }
-            rows={4}
-            className="resize-none"
-          />
-          <div className="flex items-center justify-between">
-            <p className="text-xs text-muted-foreground">
-              {prompt.trim().length} characters — at least 3 to submit
+        {empty ? (
+          <div className="flex min-h-[60vh] flex-col items-center justify-center gap-3 text-center">
+            <span className="size-12 rounded-2xl bg-gradient-to-br from-indigo-500 via-violet-500 to-fuchsia-500 p-3 opacity-70" aria-hidden="true" />
+            <h1 className="text-xl font-semibold tracking-tight">What will you dream today?</h1>
+            <p className="max-w-sm text-sm text-muted-foreground">
+              Your generations will appear here — prompt to clip with a 16-keyframe timeline, or a prism still.
+              The dock below is the whole studio.
             </p>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => void enhance()}
-              disabled={enhancing}
+          </div>
+        ) : (
+          <div className="columns-1 gap-4 sm:columns-2 lg:columns-3 2xl:columns-4">
+            {activeJob && <FeedCard job={activeJob} featured user={user} />}
+            {feedLoading && !feedJobs.length && !activeJob
+              ? Array.from({ length: 4 }).map((_, i) => (
+                  <div
+                    key={i}
+                    className="mb-4 h-64 break-inside-avoid animate-pulse rounded-2xl bg-muted/60"
+                    aria-hidden="true"
+                  />
+                ))
+              : feedJobs.map((job) => <FeedCard key={job.id} job={job} user={user} />)}
+          </div>
+        )}
+      </div>
+
+      {/* ---------------------------------------------------- prompt dock */}
+      <div className="pointer-events-none fixed inset-x-0 bottom-0 z-50">
+        <div className="pointer-events-auto mx-auto flex w-full max-w-3xl flex-col gap-2 px-4 pb-4">
+          {error && (
+            <p
+              role="alert"
+              className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-600 dark:text-red-400"
             >
-              {enhancing ? 'Dreaming…' : 'Enhance'}
-            </Button>
-          </div>
-        </div>
+              {error}
+            </p>
+          )}
 
-        {variants.length > 0 && (
-          <div className="space-y-2 rounded-xl border border-border/60 bg-muted/30 p-4">
-            <p className="text-xs font-medium text-muted-foreground">Variants — tap one to adopt it</p>
-            <div className="flex flex-wrap gap-2">
-              {variants.map((variant) => (
-                <button
-                  key={variant}
-                  type="button"
-                  onClick={() => applyVariant(variant)}
-                  className="rounded-full border border-primary/40 bg-primary/10 px-3 py-1 text-xs text-foreground transition hover:bg-primary/20"
-                >
-                  {variant}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {mode === 'video' && (
-          <div className="space-y-2">
-            <Label htmlFor="dream-keyframes">
-              Keyframe timeline <span className="text-muted-foreground">({pins.length}/{MAX_KEYFRAMES})</span>
-            </Label>
-            <div className="flex flex-wrap gap-2">
-              {pins.map((pin, i) => (
-                <span
-                  key={`${pin.name ?? 'pin'}-${i}`}
-                  className="group relative overflow-hidden rounded-lg border border-border/60"
-                >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={pin.dataUrl} alt={`Keyframe ${i + 1}`} className="size-16 object-cover" />
+          {variants.length > 0 && (
+            <div className="space-y-2 rounded-xl border border-border/60 bg-card/95 p-3 shadow-lg shadow-black/20 backdrop-blur">
+              <p className="text-xs font-medium text-muted-foreground">Variants — tap one to adopt it</p>
+              <div className="flex flex-wrap gap-2">
+                {variants.map((variant) => (
                   <button
+                    key={variant}
                     type="button"
-                    onClick={() => removePin(i)}
-                    aria-label={`Remove keyframe ${i + 1}`}
-                    className="absolute inset-x-0 bottom-0 bg-black/70 py-0.5 text-[10px] text-white opacity-0 transition group-hover:opacity-100"
+                    onClick={() => applyVariant(variant)}
+                    className="rounded-full border border-primary/40 bg-primary/10 px-3 py-1 text-xs text-foreground transition hover:bg-primary/20"
                   >
-                    remove
+                    {variant}
                   </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* T14 render truth — say what a "dream" actually is on this deployment. */}
+          {health?.activeProvider === 'demo' && (
+            <div
+              data-testid="demo-tier-notice"
+              role="note"
+              className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-amber-700 dark:text-amber-400"
+            >
+              <span className="font-semibold">Demo tier</span> — this deployment has no
+              generation provider wired: video renders are local storyboard composites
+              {health.imageSdkAvailable
+                ? ' of locally generated keyframes.'
+                : ' of placeholder art, watermarked as simulated.'}{' '}
+              Charges still apply and failed renders refund; wire a hosted provider key
+              to render with a real model.
+            </div>
+          )}
+
+          <form
+            onSubmit={submit}
+            className="overflow-hidden rounded-3xl border border-border/70 bg-card/95 shadow-2xl shadow-black/50 backdrop-blur"
+          >
+            {/* ------------------------------------------------ recipe tray */}
+            <div className="space-y-3 border-b border-border/60 p-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="sr-only">Creation mode</span>
+                {(['video', 'image'] as const).map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => setMode(m)}
+                    aria-pressed={mode === m}
+                    className={`rounded-full px-3 py-1 text-xs font-medium capitalize transition ${
+                      mode === m
+                        ? 'bg-primary text-primary-foreground'
+                        : 'border border-border/60 text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    {m}
+                  </button>
+                ))}
+
+                <span className="mx-1 h-4 w-px bg-border/70" aria-hidden="true" />
+
+                {mode === 'video' &&
+                  VIDEO_MODELS.map((m) => (
+                    <Chip key={m} active={model === m} onClick={() => setModel(m)}>
+                      {MODEL_LABELS[m] ?? m}
+                    </Chip>
+                  ))}
+
+                {mode === 'video' &&
+                  RESOLUTIONS.map((r) => (
+                    <Chip key={r} active={resolution === r} onClick={() => setResolution(r)}>
+                      {r}
+                    </Chip>
+                  ))}
+
+                {mode === 'video' &&
+                  DURATIONS.map((d) => (
+                    <Chip key={d} active={durationSec === d} onClick={() => setDurationSec(d)}>
+                      {d}s
+                    </Chip>
+                  ))}
+
+                <span className="mx-1 h-4 w-px bg-border/70" aria-hidden="true" />
+
+                {ASPECT_RATIOS.map((a) => (
+                  <Chip key={a} active={aspectRatio === a} onClick={() => setAspectRatio(a)}>
+                    {a}
+                  </Chip>
+                ))}
+
+                {mode === 'video' && (
+                  <>
+                    <label className="flex cursor-pointer items-center gap-1.5 rounded-full border border-border/60 px-3 py-1 text-xs text-muted-foreground transition hover:text-foreground">
+                      <input
+                        type="checkbox"
+                        checked={hdr}
+                        onChange={(e) => setHdr(e.target.checked)}
+                        className="size-3.5 accent-primary"
+                      />
+                      HDR
+                    </label>
+                    <label className="flex cursor-pointer items-center gap-1.5 rounded-full border border-border/60 px-3 py-1 text-xs text-muted-foreground transition hover:text-foreground">
+                      <input
+                        type="checkbox"
+                        checked={loop}
+                        onChange={(e) => setLoop(e.target.checked)}
+                        className="size-3.5 accent-primary"
+                      />
+                      Loop
+                    </label>
+                  </>
+                )}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                {mode === 'video' && (
+                  <>
+                    <Label htmlFor="dream-keyframes" className="sr-only">
+                      Keyframe timeline ({pins.length}/{MAX_KEYFRAMES})
+                    </Label>
+                    <div className="flex flex-wrap gap-1.5">
+                      {pins.map((pin, i) => (
+                        <span
+                          key={`${pin.name ?? 'pin'}-${i}`}
+                          className="group relative overflow-hidden rounded-lg border border-border/60"
+                        >
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={pin.dataUrl} alt={`Keyframe ${i + 1}`} className="size-10 object-cover" />
+                          <button
+                            type="button"
+                            onClick={() => removePin(i)}
+                            aria-label={`Remove keyframe ${i + 1}`}
+                            className="absolute inset-0 bg-black/70 text-[10px] text-white opacity-0 transition group-hover:opacity-100"
+                          >
+                            ✕
+                          </button>
+                        </span>
+                      ))}
+                      <label className="flex size-10 cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-border text-[9px] leading-tight text-muted-foreground transition hover:border-primary/50 hover:text-foreground">
+                        <Paperclip className="size-3.5" aria-hidden="true" />
+                        <span className="sr-only">pin frames</span>
+                        <span aria-hidden="true">pin</span>
+                        <input
+                          ref={fileInput}
+                          id="dream-keyframes"
+                          type="file"
+                          accept="image/*"
+                          multiple
+                          onChange={onFiles}
+                          className="hidden"
+                        />
+                      </label>
+                    </div>
+                  </>
+                )}
+
+                {boards.length > 0 && (
+                  <select
+                    aria-label="Board"
+                    value={boardId}
+                    onChange={(e) => setBoardId(e.target.value)}
+                    className="h-8 rounded-full border border-border/60 bg-transparent px-3 text-xs text-muted-foreground"
+                  >
+                    <option value="">No board</option>
+                    {boards.map((b) => (
+                      <option key={b.id} value={b.id}>
+                        {b.name}
+                      </option>
+                    ))}
+                  </select>
+                )}
+
+                <span className="ml-auto text-xs text-muted-foreground">
+                  <span className="font-semibold text-foreground">{cost.toLocaleString()} credits</span>
+                  {' · '}balance {user.credits.toLocaleString()} on {user.plan} — failures refund in full
                 </span>
-              ))}
-              <label className="flex size-16 cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-border text-[10px] text-muted-foreground transition hover:border-primary/50 hover:text-foreground">
-                <span>pin</span>
-                <span>frame</span>
-                <input
-                  ref={fileInput}
-                  id="dream-keyframes"
-                  type="file"
-                  accept="image/*"
-                  multiple
-                  onChange={onFiles}
-                  className="hidden"
-                />
-              </label>
+              </div>
             </div>
-          </div>
-        )}
 
-        {error && (
-          <p
-            role="alert"
-            className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-600 dark:text-red-400"
-          >
-            {error}
-          </p>
-        )}
-
-        {/* T14 render truth — say what a "dream" actually is on this deployment. */}
-        {health?.activeProvider === 'demo' && (
-          <div
-            data-testid="demo-tier-notice"
-            role="note"
-            className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-amber-700 dark:text-amber-400"
-          >
-            <span className="font-semibold">Demo tier</span> — this deployment has no
-            generation provider wired: video renders are local storyboard composites
-            {health.imageSdkAvailable
-              ? ' of locally generated keyframes.'
-              : ' of placeholder art, watermarked as simulated.'}{' '}
-            Charges still apply and failed renders refund; wire a hosted provider key
-            to render with a real model.
-          </div>
-        )}
-
-        <Button type="submit" size="lg" className="w-full" disabled={busy}>
-          {busy ? 'Rendering the request…' : 'Dream it'}
-        </Button>
-      </form>
-
-      {/* ------------------------------------------------------- recipe */}
-      <aside className="space-y-5 rounded-2xl border border-border/60 bg-card/70 p-5">
-        {mode === 'video' && (
-          <>
-            <fieldset className="space-y-2">
-              <legend className="text-xs font-medium text-muted-foreground">Model</legend>
-              <div className="flex flex-wrap gap-2">
-                {VIDEO_MODELS.map((m) => (
-                  <Chip key={m} active={model === m} onClick={() => setModel(m)}>
-                    {MODEL_LABELS[m] ?? m}
-                  </Chip>
-                ))}
+            {/* -------------------------------------------------- dock row */}
+            <div className="flex items-end gap-2 p-2.5">
+              <SlidersHorizontal className="mb-2.5 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+              <div className="min-w-0 flex-1">
+                <Label htmlFor="dream-prompt" className="sr-only">
+                  Prompt
+                </Label>
+                <Textarea
+                  id="dream-prompt"
+                  value={prompt}
+                  onChange={(e) => setPrompt(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault()
+                      void submit()
+                    }
+                  }}
+                  placeholder={
+                    mode === 'video'
+                      ? 'What will you dream today?'
+                      : 'Describe the still — chrome dunes under a violet dusk…'
+                  }
+                  rows={1}
+                  className="max-h-36 min-h-10 resize-none border-0 bg-transparent p-2.5 text-sm shadow-none focus-visible:ring-0 dark:bg-transparent"
+                />
+                <p className="sr-only">{prompt.trim().length} characters — at least 3 to submit</p>
               </div>
-            </fieldset>
-
-            <fieldset className="space-y-2">
-              <legend className="text-xs font-medium text-muted-foreground">Resolution</legend>
-              <div className="flex flex-wrap gap-2">
-                {RESOLUTIONS.map((r) => (
-                  <Chip key={r} active={resolution === r} onClick={() => setResolution(r)}>
-                    {r}
-                  </Chip>
-                ))}
-              </div>
-            </fieldset>
-
-            <fieldset className="space-y-2">
-              <legend className="text-xs font-medium text-muted-foreground">Duration</legend>
-              <div className="flex flex-wrap gap-2">
-                {DURATIONS.map((d) => (
-                  <Chip key={d} active={durationSec === d} onClick={() => setDurationSec(d)}>
-                    {d}s
-                  </Chip>
-                ))}
-              </div>
-            </fieldset>
-          </>
-        )}
-
-        <fieldset className="space-y-2">
-          <legend className="text-xs font-medium text-muted-foreground">Aspect ratio</legend>
-          <div className="flex flex-wrap gap-2">
-            {ASPECT_RATIOS.map((a) => (
-              <Chip key={a} active={aspectRatio === a} onClick={() => setAspectRatio(a)}>
-                {a}
-              </Chip>
-            ))}
-          </div>
-        </fieldset>
-
-        {mode === 'video' && (
-          <div className="flex flex-wrap gap-4">
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={hdr}
-                onChange={(e) => setHdr(e.target.checked)}
-                className="size-4 accent-primary"
-              />
-              HDR <span className="text-xs text-muted-foreground">(2x)</span>
-            </label>
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={loop}
-                onChange={(e) => setLoop(e.target.checked)}
-                className="size-4 accent-primary"
-              />
-              Loop <span className="text-xs text-muted-foreground">(free)</span>
-            </label>
-          </div>
-        )}
-
-        <div className="space-y-2">
-          <Label htmlFor="dream-board">Board</Label>
-          <select
-            id="dream-board"
-            aria-label="Board"
-            value={boardId}
-            onChange={(e) => setBoardId(e.target.value)}
-            className="h-9 w-full rounded-lg border border-border bg-transparent px-3 text-sm"
-          >
-            <option value="">No board</option>
-            {boards.map((b) => (
-              <option key={b.id} value={b.id}>
-                {b.name}
-              </option>
-            ))}
-          </select>
+              <button
+                type="button"
+                onClick={() => void enhance()}
+                disabled={enhancing}
+                title="Enhance the prompt with brainstorm variants"
+                className="flex h-10 shrink-0 items-center gap-1.5 rounded-full px-3 text-xs font-medium text-muted-foreground transition hover:bg-muted/60 hover:text-foreground disabled:opacity-50"
+              >
+                <Wand2 className="size-4" aria-hidden="true" />
+                {enhancing ? 'Dreaming…' : 'Enhance'}
+              </button>
+              <button
+                type="submit"
+                aria-label="Dream it"
+                title={busy ? 'Rendering the request…' : 'Dream it'}
+                disabled={busy}
+                className="flex size-10 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg shadow-primary/25 transition hover:bg-primary/90 disabled:opacity-50"
+              >
+                <ArrowUp className="size-5" aria-hidden="true" />
+              </button>
+            </div>
+          </form>
         </div>
-
-        <div className="rounded-xl bg-muted/50 p-4">
-          <div className="flex items-baseline justify-between">
-            <span className="text-xs font-medium text-muted-foreground">This dream costs</span>
-            <span className="text-lg font-semibold tracking-tight">{cost.toLocaleString()} credits</span>
-          </div>
-          <p className="mt-1 text-[11px] text-muted-foreground">
-            Balance: {user.credits.toLocaleString()} credits on the {user.plan} plan — failed renders refund in full.
-          </p>
-        </div>
-      </aside>
-
-      {/* --------------------------------------------------- active job */}
-      {activeJob && (
-        <section className="lg:col-span-2">
-          <div className="overflow-hidden rounded-2xl border border-border/60 bg-card/70">
-            <div className={`relative ${aspectClass(activeJob.aspectRatio)} bg-black`}>
-              {render && activeJob.kind === 'video' ? (
-                <video
-                  data-testid="rendered-video"
-                  src={render.path}
-                  controls
-                  autoPlay
-                  muted
-                  loop
-                  playsInline
-                  className="size-full object-contain"
-                />
-              ) : render ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  data-testid="rendered-still"
-                  src={render.path}
-                  alt={activeJob.prompt}
-                  className="size-full object-contain"
-                />
-              ) : (
-                <div className="flex size-full flex-col items-center justify-center gap-3 text-muted-foreground">
-                  <span className="size-10 animate-pulse rounded-full bg-gradient-to-br from-indigo-500 via-violet-500 to-fuchsia-500" />
-                  <p className="text-sm">{activeJob.progress > 0 ? `${activeJob.progress}%` : 'in the pipeline'}</p>
-                </div>
-              )}
-            </div>
-            <div className="flex flex-wrap items-center gap-3 p-4">
-              <StatusChip status={activeJob.status} />
-              <MetaChip>{activeJob.model}</MetaChip>
-              <MetaChip>{activeJob.resolution}</MetaChip>
-              <MetaChip>{activeJob.aspectRatio}</MetaChip>
-              {activeJob.kind === 'video' && <MetaChip>{activeJob.durationSec}s</MetaChip>}
-              <MetaChip>{activeJob.creditsCharged} credits</MetaChip>
-              {activeJob.placeholderRender && <MetaChip>simulated render</MetaChip>}
-              <span className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
-                <AvatarBlob seed={user.avatarSeed} name={user.name} size="sm" />
-                {user.name}
-              </span>
-            </div>
-            {activeJob.status === 'failed' && activeJob.errorMessage && (
-              <p role="alert" className="border-t border-border/60 p-4 text-sm text-red-500">
-                {activeJob.errorMessage} — the {activeJob.creditsCharged} credits were refunded.
-              </p>
-            )}
-            {activeJob.status === 'completed' && (
-              <p className="border-t border-border/60 p-4 text-sm text-muted-foreground">
-                Dream rendered. File it to a board, share it unlisted, or keep dreaming —{' '}
-                <Link href="/history" className="text-primary underline-offset-4 hover:underline">
-                  it&rsquo;s in your history
-                </Link>
-                .
-              </p>
-            )}
-          </div>
-        </section>
-      )}
+      </div>
     </div>
+  )
+}
+
+// ------------------------------------------------------------- feed card
+function FeedCard({ job, featured, user }: { job: JobView; featured?: boolean; user: SessionUser }) {
+  const render = mainAsset(job)
+  const pending = !TERMINAL_STATUSES.includes(job.status)
+
+  return (
+    <article className="group relative mb-4 break-inside-avoid overflow-hidden rounded-2xl border border-border/60 bg-card/60">
+      <div className={`relative ${aspectClass(job.aspectRatio)} bg-black`}>
+        {render && job.kind === 'video' ? (
+          <video
+            data-testid={featured ? 'rendered-video' : undefined}
+            src={render.path}
+            controls={featured}
+            autoPlay
+            muted
+            loop
+            playsInline
+            className="size-full object-cover"
+          />
+        ) : render ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            data-testid={featured ? 'rendered-still' : undefined}
+            src={render.path}
+            alt={job.prompt}
+            className="size-full object-cover"
+          />
+        ) : pending ? (
+          <div className="flex size-full flex-col items-center justify-center gap-2 bg-muted/40">
+            <span className="size-8 animate-pulse rounded-full bg-gradient-to-br from-indigo-500 via-violet-500 to-fuchsia-500" />
+            <p className="text-xs text-muted-foreground">
+              {job.progress > 0 ? `${job.progress}%` : 'in the pipeline'}
+            </p>
+          </div>
+        ) : (
+          <div className="flex size-full items-center justify-center p-4 text-center text-xs text-muted-foreground">
+            {job.status === 'failed'
+              ? 'The render failed and the credits were refunded.'
+              : 'No render for this dream.'}
+          </div>
+        )}
+
+        {/* hover overlay — prompt on hover, the Dream-Machine way */}
+        <div className="pointer-events-none absolute inset-0 flex flex-col justify-end bg-gradient-to-t from-black/70 via-black/10 to-transparent opacity-0 transition group-hover:opacity-100">
+          <p className="line-clamp-2 px-3 pb-2 pt-10 text-xs text-white/90">{job.prompt}</p>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-1.5 p-2.5">
+        <StatusChip status={job.status} />
+        <MetaChip>{job.model}</MetaChip>
+        <MetaChip>{job.aspectRatio}</MetaChip>
+        {job.kind === 'video' && <MetaChip>{job.durationSec}s</MetaChip>}
+        <MetaChip>{job.creditsCharged} cr</MetaChip>
+        {job.placeholderRender && <MetaChip>simulated render</MetaChip>}
+        {featured && (
+          <span className="ml-auto flex items-center gap-1.5 text-[11px] text-muted-foreground">
+            <AvatarBlob seed={user.avatarSeed} name={user.name} size="sm" />
+            {user.name}
+          </span>
+        )}
+      </div>
+
+      {featured && job.status === 'failed' && job.errorMessage && (
+        <p role="alert" className="border-t border-border/60 p-3 text-xs text-red-500">
+          {job.errorMessage} — the {job.creditsCharged} credits were refunded.
+        </p>
+      )}
+      {featured && job.status === 'completed' && (
+        <p className="border-t border-border/60 p-3 text-xs text-muted-foreground">
+          Dream rendered —{' '}
+          <Link href="/history" className="text-primary underline-offset-4 hover:underline">
+            extend, remix or share it from your history
+          </Link>
+          .
+        </p>
+      )}
+    </article>
   )
 }
 
@@ -641,7 +741,7 @@ function Chip({
       type="button"
       onClick={onClick}
       aria-pressed={active}
-      className={`rounded-lg px-3 py-1 text-sm transition ${
+      className={`rounded-full px-2.5 py-1 text-xs transition ${
         active
           ? 'bg-primary text-primary-foreground'
           : 'border border-border/60 text-muted-foreground hover:text-foreground'

@@ -59,6 +59,11 @@ function PageHeading({ title, subtitle }: { title: string; subtitle: string }) {
   )
 }
 
+/** Fluid-shell page container — every non-create page owns its own gutters. */
+function PageWrap({ children }: { children: React.ReactNode }) {
+  return <div className="mx-auto w-full max-w-6xl px-4 py-8 pb-24 md:px-6">{children}</div>
+}
+
 export function CreateScreen() {
   const { user, loading, refresh, signOut } = useSession()
   const router = useRouter()
@@ -79,15 +84,6 @@ export function CreateScreen() {
         void signOut().then(() => router.push('/'))
       }}
     >
-      {prefill && (
-        <p className="mb-4 rounded-lg border border-primary/30 bg-primary/10 px-4 py-2 text-sm text-primary">
-          Remix loaded into the composer — adjust the recipe and dream it yourself. Nothing is charged until you submit.
-        </p>
-      )}
-      <PageHeading
-        title="What will you dream today?"
-        subtitle="Prompt to clip with a 16-keyframe timeline, or a prism still — honest credits, refunds on failure."
-      />
       <CreateApp user={user} prefill={prefill} onCreditsChanged={() => void refresh()} />
     </AppShell>
   )
@@ -97,11 +93,13 @@ export function ExploreScreen() {
   const { user, loading, signOut } = useSession()
   return (
     <AppShell user={user} loading={loading} current="explore">
-      <PageHeading
-        title="Explore the ideas feed"
-        subtitle="Shared dreams from the community — hover to play, like what moves you, remix anything."
-      />
-      <ExploreApp viewer={user} />
+      <PageWrap>
+        <PageHeading
+          title="Explore the ideas feed"
+          subtitle="Shared dreams from the community — hover to play, like what moves you, remix anything."
+        />
+        <ExploreApp viewer={user} />
+      </PageWrap>
     </AppShell>
   )
 }
@@ -110,11 +108,13 @@ export function HistoryScreen() {
   const { user, loading, signOut } = useSession()
   return (
     <AppShell user={user} loading={loading} current="history">
-      <PageHeading
-        title="Your history"
-        subtitle="Every dream with its recipe — extend, modify, reframe, upscale, share unlisted or remix."
-      />
-      <HistoryApp user={user} />
+      <PageWrap>
+        <PageHeading
+          title="Your history"
+          subtitle="Every dream with its recipe — extend, modify, reframe, upscale, share unlisted or remix."
+        />
+        <HistoryApp user={user} />
+      </PageWrap>
     </AppShell>
   )
 }
@@ -131,11 +131,13 @@ export function BoardsScreen() {
         void signOut().then(() => router.push('/'))
       }}
     >
-      <PageHeading
-        title="Boards"
-        subtitle="File finished dreams into boards, share a board with one unlisted link."
-      />
-      <BoardsApp user={user} />
+      <PageWrap>
+        <PageHeading
+          title="Boards"
+          subtitle="File finished dreams into boards, share a board with one unlisted link."
+        />
+        <BoardsApp user={user} />
+      </PageWrap>
     </AppShell>
   )
 }
@@ -152,11 +154,13 @@ export function KeysScreen() {
         void signOut().then(() => router.push('/'))
       }}
     >
-      <PageHeading
-        title="API keys"
-        subtitle="Drive Somnia from your own scripts — sk_somnia keys, hashed at rest, revocable any time."
-      />
-      <KeysApp user={user} />
+      <PageWrap>
+        <PageHeading
+          title="API keys"
+          subtitle="Drive Somnia from your own scripts — sk_somnia keys, hashed at rest, revocable any time."
+        />
+        <KeysApp user={user} />
+      </PageWrap>
     </AppShell>
   )
 }
@@ -173,7 +177,9 @@ export function PlansScreen() {
         void signOut().then(() => router.push('/'))
       }}
     >
-      <PlansApp user={user} />
+      <PageWrap>
+        <PlansApp user={user} />
+      </PageWrap>
     </AppShell>
   )
 }
@@ -190,11 +196,13 @@ export function InsightsScreen() {
         void signOut().then(() => router.push('/'))
       }}
     >
-      <PageHeading
-        title="Insights"
-        subtitle="Your usage and the margin lens — jobs, credits, revenue, provider cost, one honest snapshot."
-      />
-      <InsightsApp user={user} />
+      <PageWrap>
+        <PageHeading
+          title="Insights"
+          subtitle="Your usage and the margin lens — jobs, credits, revenue, provider cost, one honest snapshot."
+        />
+        <InsightsApp user={user} />
+      </PageWrap>
     </AppShell>
   )
 }
@@ -211,11 +219,13 @@ export function AgentsScreen() {
         void signOut().then(() => router.push('/'))
       }}
     >
-      <PageHeading
-        title="Agents"
-        subtitle="Describe a goal — the agent plans the shots, you dispatch them, the credits stay honest."
-      />
-      <AgentsApp user={user} onCreditsChanged={() => void refresh()} />
+      <PageWrap>
+        <PageHeading
+          title="Agents"
+          subtitle="Describe a goal — the agent plans the shots, you dispatch them, the credits stay honest."
+        />
+        <AgentsApp user={user} onCreditsChanged={() => void refresh()} />
+      </PageWrap>
     </AppShell>
   )
 }
