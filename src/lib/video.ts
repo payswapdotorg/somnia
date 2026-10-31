@@ -5,6 +5,7 @@ import path from 'path'
 import { absoluteFromPublic, ensureGeneratedDirWritable, GENERATED_DIR } from '@/lib/frames'
 import { mirrorLocalFile, resolveMediaInput } from '@/lib/blob'
 import { resolveFfmpegBin } from '@/lib/runtime'
+import { renderProfileFor } from '@/lib/models'
 import type { CameraPresetId } from '@/lib/presets'
 import type { AspectRatio, Resolution } from '@/lib/plans'
 
@@ -34,7 +35,7 @@ import type { AspectRatio, Resolution } from '@/lib/plans'
 const FPS = 30
 /** Crossfade overlap between neighbouring segments, in seconds. */
 const XFADE_SEC = 0.5
-/** Ken Burns zoom ceiling (segment zooms travel between 1.0 and this). */
+/** Ken Burns zoom ceiling for unknown models (segment zooms travel between 1.0 and this). */
 const MAX_ZOOM = 1.1
 /** Virtual camera move zoom ceiling (Phase 3 presets travel between 1.0 and this). */
 const CAMERA_MAX_ZOOM = 1.14
@@ -132,12 +133,12 @@ function runFfmpeg(args: string[], timeoutMs: number): Promise<FfmpegRunResult> 
   })
 }
 
-function kenBurnsZoomExpression(segFrames: number, zoomIn: boolean): string {
-  // Deterministic per-frame zoom: linear travel between 1.0 and MAX_ZOOM.
-  const rate = (MAX_ZOOM - 1) / Math.max(1, segFrames - 1)
+function kenBurnsZoomExpression(segFrames: number, zoomIn: boolean, maxZoom: number): string {
+  // Deterministic per-frame zoom: linear travel between 1.0 and maxZoom.
+  const rate = (maxZoom - 1) / Math.max(1, segFrames - 1)
   return zoomIn
-    ? `min(1+${rate.toFixed(6)}*on,${MAX_ZOOM})`
-    : `max(${MAX_ZOOM}-${rate.toFixed(6)}*on,1.0)`
+    ? `min(1+${rate.toFixed(6)}*on,${maxZoom})`
+    : `max(${maxZoom}-${rate.toFixed(6)}*on,1.0)`
 }
 
 /** Phase 3 virtual camera moves: preset ids live in the shared presets module. */
@@ -169,7 +170,8 @@ function segmentFilter(
   canvas: { w: number; h: number },
   segFrames: number,
   motion: Motion,
-  kenBurnsZoomIn: boolean
+  kenBurnsZoomIn: boolean,
+  kenBurnsMaxZoom: number = MAX_ZOOM
 ): string {
   // 2× working buffer keeps zoompan's integer-pixel stepping sub-pixel at the
   // output scale (classic Ken Burns smoothness trick).
@@ -179,7 +181,7 @@ function segmentFilter(
   let x: string
   const y = 'ih/2-(ih/zoom/2)'
   if (motion === 'kenburns') {
-    zoom = kenBurnsZoomExpression(segFrames, kenBurnsZoomIn)
+    zoom = kenBurnsZoomExpression(segFrames, kenBurnsZoomIn, kenBurnsMaxZoom)
     x = 'iw/2-(iw/zoom/2)'
   } else if (motion === 'push-in' || motion === 'pull-back') {
     zoom = cameraZoomExpression(segFrames, motion)
@@ -210,6 +212,13 @@ export interface RenderVideoOptions {
   segments: string[]
   /** Segment motion. Default 'kenburns' (alternating Phase 2 look). */
   motion?: Motion
+  /**
+   * T19 — Somnia model id ('pulse-3' | 'pulse-flash' | ...). Selects the
+   * render profile (Ken Burns travel ceiling + CRF delta) for kenburns
+   * motion; unknown ids keep the original constants. Camera/drift presets
+   * have their own ceilings and are unaffected.
+   */
+  model?: string
   /** Base file name (without extension) — defaults to the jobId. Phase 3
    * camera variants render to `<jobId>-camera-<preset>`. */
   outputName?: string
@@ -227,6 +236,10 @@ export async function renderVideo(options: RenderVideoOptions): Promise<string |
   const outputName = options.outputName ?? jobId
   const segments = options.segments.filter((s) => typeof s === 'string' && s.length > 0)
   if (segments.length === 0) return null
+
+  // T19 — per-model render profile (zoom ceiling + encode coarseness).
+  const profile = renderProfileFor(options.model)
+  const kenBurnsMaxZoom = motion === 'kenburns' ? profile.kenBurnsMaxZoom : MAX_ZOOM
 
   const canvas = CANVAS[resolution]?.[aspectRatio]
   if (!canvas) return null
@@ -246,7 +259,7 @@ export async function renderVideo(options: RenderVideoOptions): Promise<string |
       Math.round(((durationSec + (count - 1) * XFADE_SEC) / count) * FPS)
     )
     const segDur = segFrames / FPS
-    const crf = CRF_BY_RESOLUTION[resolution]
+    const crf = CRF_BY_RESOLUTION[resolution] + profile.crfDelta
 
     // 1) One intermediate clip per segment (Ken Burns over a single still).
     const segmentFiles: string[] = []
@@ -264,7 +277,7 @@ export async function renderVideo(options: RenderVideoOptions): Promise<string |
         '-i',
         source,
         '-vf',
-        segmentFilter(canvas, segFrames, motion, index % 2 === 0),
+        segmentFilter(canvas, segFrames, motion, index % 2 === 0, kenBurnsMaxZoom),
         '-frames:v',
         String(segFrames),
         '-c:v',

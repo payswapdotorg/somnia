@@ -243,7 +243,7 @@ done
     'https://picsum.photos/seed/somnia2/640/360',
   ]
 
-  log('self-test 1/3: prompt-only video')
+  log('self-test 1/5: prompt-only video (unknown model → default profile)')
   const vid1 = await submit('/v1/video/jobs', {
     model: GATEWAY_MODEL || 'e2b-kenburns-cpu',
     prompt: 'somnia rotation smoke — golden hour clouds drifting over a calm sea',
@@ -252,7 +252,7 @@ done
   const r1 = await pollJob(url, apiKey, `/v1/video/jobs/${vid1}`, 150_000)
   await check200(r1.video_url, apiKey, 'video_url')
 
-  log('self-test 2/3: pinned-timeline video')
+  log('self-test 2/5: pinned-timeline video')
   const vid2 = await submit('/v1/video/jobs', {
     model: GATEWAY_MODEL || 'e2b-kenburns-cpu',
     prompt: 'pinned timeline smoke',
@@ -262,7 +262,7 @@ done
   await check200(r2.video_url, apiKey, 'pinned video_url')
   if (!Array.isArray(r2.frames) || r2.frames.length === 0) throw new Error('pinned video returned no frames')
 
-  log('self-test 3/3: prism still')
+  log('self-test 3/5: prism still')
   const img1 = await submit('/v1/image/jobs', {
     model: GATEWAY_MODEL || 'e2b-kenburns-cpu',
     prompt: 'prism still smoke',
@@ -270,6 +270,32 @@ done
   })
   const r3 = await pollJob(url, apiKey, `/v1/image/jobs/${img1}`, 120_000)
   await check200(r3.image_url, apiKey, 'image_url')
+
+  // T19 — model-keyed rendering: the premium model gets a denser storyboard
+  // than the flash model. 3s: pulse-3 → 4 beats, pulse-flash → 2 beats.
+  log('self-test 4/5: pulse-3 premium storyboard')
+  const vid3 = await submit('/v1/video/jobs', {
+    model: 'pulse-3',
+    prompt: 'somnia premium smoke — four beats of drifting cirrus over basalt',
+    resolution: '540p', duration_sec: 3, aspect_ratio: '16:9', hdr: false, loop: false, keyframes: [],
+  })
+  const r4 = await pollJob(url, apiKey, `/v1/video/jobs/${vid3}`, 150_000)
+  await check200(r4.video_url, apiKey, 'pulse-3 video_url')
+  if (!Array.isArray(r4.frames) || r4.frames.length !== 4) {
+    throw new Error(`pulse-3 3s should render 4 beats, got ${r4.frames?.length}`)
+  }
+
+  log('self-test 5/5: pulse-flash lean storyboard')
+  const vid4 = await submit('/v1/video/jobs', {
+    model: 'pulse-flash',
+    prompt: 'somnia flash smoke — two quick beats',
+    resolution: '540p', duration_sec: 3, aspect_ratio: '16:9', hdr: false, loop: false, keyframes: [],
+  })
+  const r5 = await pollJob(url, apiKey, `/v1/video/jobs/${vid4}`, 150_000)
+  await check200(r5.video_url, apiKey, 'pulse-flash video_url')
+  if (!Array.isArray(r5.frames) || r5.frames.length !== 2) {
+    throw new Error(`pulse-flash 3s should render 2 beats, got ${r5.frames?.length}`)
+  }
 
   log('full contract self-test PASSED')
 

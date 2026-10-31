@@ -328,7 +328,7 @@ describe('blob — pipeline durability', () => {
     const frames = await db.asset.findMany({
       where: { jobId: job.id, kind: 'frame' },
     })
-    expect(frames).toHaveLength(3) // 5s storyboard = 3 beats
+    expect(frames).toHaveLength(4) // 5s storyboard = 4 beats (T19 pulse-3 profile)
     for (const frame of frames) {
       expect(frame.path).toMatch(
         /^https:\/\/fake-store\.public\.blob\.vercel-storage\.com\/.+\.png$/

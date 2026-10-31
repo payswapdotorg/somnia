@@ -739,3 +739,63 @@ clean; signed up a fresh account on somnia-bay.vercel.app, dreamed 5 clips
 from the dock (all completed through the live E2B tier into Vercel Blob),
 VLM parity review of the rendered home scored 9/10 vs the Dream-Machine
 language (rail + masonry + dock + dark/orange accents all confirmed).
+
+## T18 addendum — Enhance variant contract + honest board counts
+
+Shipped in `f578d65` (4 files). Two production-true bugs found by the
+fullscreen audit:
+
+- **Enhance crashed the app**: `/api/brainstorm` returns `BrainstormVariant`
+  objects (`{style,label,text,blurb}`), but the composer rendered the objects
+  themselves as React children. `create-app.tsx` now types the state as
+  `BrainstormVariant[]`, renders `label` + `text` with `blurb` as the chip
+  title, and defensively filters any drift (`(body?.variants ?? []).filter(v
+  => v && typeof v.text === 'string' && v.text.trim().length > 0)`) — a
+  contract change degrades to "no variants", never a crash.
+- **Board dream counts were dishonest**: `listBoards` counted every job
+  including failed/refunded ones; the groupBy now filters `status:
+  'completed'`, matching the cover logic and the public board view.
+
+## T19 addendum — multi-model routing made real (model identity end-to-end)
+
+Until T19 the model choice was pure pricing: `pulse-3` (60/100/400cr) and
+`pulse-flash` (25/40/160cr) both collapsed to the static `SELFHOSTED_MODEL`
+name at the adapter boundary and rendered byte-identically. The routing
+layer (`routing.ts`, T12) picked a TIER per model but never conveyed the
+MODEL. T19 closes that gap:
+
+- **`src/lib/models.ts` (new)** — per-model render profiles, the single
+  source of truth: pulse-3 gets a deeper Ken Burns travel (1.18 vs 1.1) and
+  a denser storyboard (5s → 4 beats, 10s → 5); pulse-flash gets a tight
+  travel (1.06), a lean storyboard (5s → 2, 10s → 3) and a coarser encode
+  (+2 CRF — quicker, smaller). Unknown/missing model ids keep the original
+  T14 constants, so the rotation self-test and older rotators stay
+  byte-compatible.
+- **`providers/selfhosted.ts`** — the submit body now carries
+  `selfHostedModelFor(input.model)`: the `SELFHOSTED_MODELS` JSON map
+  (`{"pulse-3":"wan2.2-t2v-5b",...}`) when set, else the Somnia model id
+  itself (the E2B tier is model-aware), else the static `SELFHOSTED_MODEL`
+  fallback. **External gateways that only know their own model names should
+  set `SELFHOSTED_MODELS`** — this is the one wire-format change: unmapped
+  Somnia jobs now send `pulse-3`/`pulse-flash`/`prism` raw instead of the
+  static name.
+- **`providers/fal.ts`** — symmetric `FAL_MODELS` map; an unmapped model
+  falls back to the static `FAL_MODEL` (a raw Somnia id in the queue URL
+  path would 404).
+- **`pipeline.ts` + `video.ts`** — the local demo path mirrors the profiles
+  (model-aware storyboard density, per-profile zoom ceiling + CRF delta);
+  restyle/camera/drift variants keep the default profile.
+- **`health.ts`** — new `selfHostedModels` field: the gateway model name
+  each Somnia model resolves to right now (display strings only).
+- **`scripts/e2b/gateway.mjs`** — mirrors the profile table; the accept log
+  names the profile, and completed jobs carry the profile label.
+- **`scripts/e2b/rotate.mjs`** — the rotation self-test grew from 3 to 5:
+  pulse-3 must return a 4-beat storyboard and pulse-flash a 2-beat
+  storyboard at 3s, so every ~45min rotation continuously proves
+  model-keyed rendering on the live tier.
+
+Verified: 397/397 specs green (13 new: model propagation, per-model
+storyboard density, health surface, malformed-map safety), `tsc` clean,
+`eslint` clean, `next build` clean. Live E2E after deploy: one pulse-3 and
+one pulse-flash job on production — different keyframe counts, honest
+per-model charges (100cr vs 40cr at 720p/5s), both MP4s seekable.

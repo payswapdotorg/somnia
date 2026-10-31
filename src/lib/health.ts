@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process'
 import { resolveFfmpegBin } from '@/lib/runtime'
 import { resolveVideoProvider } from '@/lib/providers'
+import { selfHostedModelFor } from '@/lib/providers/selfhosted'
 import { isBlobConfigured } from '@/lib/blob'
 import { effectiveRoutes, effectiveImageRoutes } from '@/lib/routing'
 import { hostedLlmConfig } from '@/lib/llm'
@@ -19,6 +20,13 @@ export interface ProviderHealthDto {
   selfHostedConfigured: boolean
   /** Display string for the configured self-hosted model id (or null). */
   selfHostedModel: string | null
+  /**
+   * T19 — the gateway model name each Somnia model resolves to (display
+   * strings only): SELFHOSTED_MODELS mapping, else the Somnia model id
+   * itself (the live tier is model-aware), else SELFHOSTED_MODEL. Null when
+   * no self-hosted tier is configured.
+   */
+  selfHostedModels: Record<string, string> | null
   /** Blob store wired (BLOB_READ_WRITE_TOKEN)? Boolean only — durable media vs per-instance scratch. */
   blobStorageConfigured: boolean
   /** Hosted LLM wired (OPENROUTER_API_KEY)? Boolean only — agent planning via the real tier vs heuristic fallback. */
@@ -157,6 +165,13 @@ export async function getProviderHealth(): Promise<ProviderHealthDto> {
     selfHostedConfigured: !!process.env.SELFHOSTED_URL,
     selfHostedModel: process.env.SELFHOSTED_URL
       ? (process.env.SELFHOSTED_MODEL ?? 'wan2.2-t2v-5b')
+      : null,
+    selfHostedModels: process.env.SELFHOSTED_URL
+      ? {
+          'pulse-3': selfHostedModelFor('pulse-3'),
+          'pulse-flash': selfHostedModelFor('pulse-flash'),
+          prism: selfHostedModelFor('prism'),
+        }
       : null,
     blobStorageConfigured: isBlobConfigured(),
     llmConfigured: !!llm,

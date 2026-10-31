@@ -11,9 +11,15 @@
 //
 // Env gating (NEVER active without configuration):
 //   FAL_KEY            required to activate
-//   FAL_MODEL          queue model id (default: fal-ai/wan-t2v)
+//   FAL_MODEL          fallback queue model id (default: fal-ai/wan-t2v)
+//   FAL_MODELS         T19 per-Somnia-model queue ids, JSON
+//                      ({"pulse-3":"fal-ai/wan-t2v","pulse-flash":"fal-ai/ltx-video"})
 //   FAL_QUEUE_BASE     override the queue origin (tests point it at a local
 //                      gateway; production default https://queue.fal.run)
+//
+// T19 model resolution: the FAL_MODELS mapping first; an unmapped model
+// falls back to the static FAL_MODEL — never the raw Somnia id, which would
+// 404 the queue path.
 
 import { ingestAsset, sleep, timings } from '@/lib/providers/ingest'
 import type {
@@ -30,8 +36,42 @@ const POLL_INTERVAL_MS = 2_000
 const PROGRESS_FLOOR = 8
 const PROGRESS_CEILING = 86
 
+const MODELS_ENV = 'FAL_MODELS'
+
 export function falModel(): string {
   return process.env.FAL_MODEL || 'fal-ai/wan-t2v'
+}
+
+/**
+ * T19 — per-Somnia-model queue ids from FAL_MODELS. Malformed JSON,
+ * non-object shapes and non-string values are skipped — same policy-knob
+ * contract as SELFHOSTED_MODELS / SOMNIA_MODEL_ROUTES.
+ */
+export function falModelMap(): Record<string, string> {
+  const raw = process.env[MODELS_ENV]
+  if (!raw) return {}
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return {}
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+  const out: Record<string, string> = {}
+  for (const [model, name] of Object.entries(parsed as Record<string, unknown>)) {
+    if (typeof name === 'string' && name.trim().length > 0) out[model] = name.trim()
+  }
+  return out
+}
+
+/**
+ * T19 — the queue model id for this job: the FAL_MODELS mapping when set,
+ * else the static FAL_MODEL. A raw Somnia id never reaches the queue path.
+ */
+export function falModelFor(model: string | null | undefined): string {
+  const mapped = model ? falModelMap()[model] : undefined
+  if (mapped) return mapped
+  return falModel()
 }
 
 export function isFalConfigured(): boolean {
@@ -66,7 +106,7 @@ interface FalQueueResult {
 }
 
 async function submitToFalQueue(input: HostedRenderInput): Promise<FalSubmitResponse> {
-  const response = await fetch(`${queueBase()}/${falModel()}`, {
+  const response = await fetch(`${queueBase()}/${falModelFor(input.model)}`, {
     method: 'POST',
     headers: falHeaders(),
     signal: AbortSignal.timeout(20_000),

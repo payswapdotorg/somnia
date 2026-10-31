@@ -2,6 +2,8 @@
 node_modules/
 .pnp
 .pnp.js
+# bun is the lockfile of record; a stray npm lockfile is a local dev artifact
+package-lock.json
 
 # next.js
 .next/

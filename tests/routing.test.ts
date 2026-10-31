@@ -47,6 +47,7 @@ const FRAME = await sharp({
 const ENV_KEYS = [
   'SELFHOSTED_URL',
   'SELFHOSTED_MODEL',
+  'SELFHOSTED_MODELS',
   'SELFHOSTED_API_KEY',
   'FAL_KEY',
   'FAL_MODEL',
@@ -252,6 +253,32 @@ describe('routing — effectiveRoutes', () => {
       'pulse-3': 'selfhosted',
       'pulse-flash': 'selfhosted', // pinned to unconfigured fal → chain fallback
     })
+  })
+
+  it('T19: surfaces per-model gateway model names through the health DTO', async () => {
+    process.env.SELFHOSTED_URL = 'http://gpu.example'
+    // No map, no static model: each Somnia id resolves to itself (the live
+    // tier is model-aware).
+    let health = await getProviderHealth()
+    expect(health.selfHostedModels).toEqual({
+      'pulse-3': 'pulse-3',
+      'pulse-flash': 'pulse-flash',
+      prism: 'prism',
+    })
+
+    // The SELFHOSTED_MODELS mapping translates for foreign gateways.
+    process.env.SELFHOSTED_MODELS = '{"pulse-3":"wan2.2-t2v-5b","pulse-flash":"ltx-2.5"}'
+    health = await getProviderHealth()
+    expect(health.selfHostedModels).toEqual({
+      'pulse-3': 'wan2.2-t2v-5b',
+      'pulse-flash': 'ltx-2.5',
+      prism: 'prism', // unmapped → raw Somnia id
+    })
+  })
+
+  it('T19: health selfHostedModels is null without a self-hosted tier', async () => {
+    const health = await getProviderHealth()
+    expect(health.selfHostedModels).toBeNull()
   })
 })
 

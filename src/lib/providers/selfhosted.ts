@@ -32,8 +32,15 @@
 //
 // Env gating (NEVER active without configuration):
 //   SELFHOSTED_URL       base URL of the gateway — required to activate
-//   SELFHOSTED_MODEL     model id (default: wan2.2-t2v-5b)
+//   SELFHOSTED_MODEL     fallback model id when the job carries none
+//                        (default: wan2.2-t2v-5b)
 //   SELFHOSTED_API_KEY   optional bearer token
+//   SELFHOSTED_MODELS    T19 per-Somnia-model gateway model names, JSON
+//                        ({"pulse-3":"wan2.2-t2v-5b","pulse-flash":"ltx-2.5"}) —
+//                        map first, then the Somnia model id itself (the E2B
+//                        tier is model-aware and renders per-model profiles),
+//                        then SELFHOSTED_MODEL. External gateways that only
+//                        know their own names should set the map.
 
 import { ingestAsset, sleep, timings } from '@/lib/providers/ingest'
 import type {
@@ -60,8 +67,46 @@ const RETRY_DELAY_MS = process.env.SOMNIA_TEST ? 15 : 2_000
 const PROGRESS_FLOOR = 8
 const PROGRESS_CEILING = 86
 
+const MODELS_ENV = 'SELFHOSTED_MODELS'
+
 export function selfHostedModel(): string {
   return process.env.SELFHOSTED_MODEL || 'wan2.2-t2v-5b'
+}
+
+/**
+ * T19 — per-Somnia-model gateway model names from SELFHOSTED_MODELS. 
+ * Malformed JSON, non-object shapes and non-string values are skipped — a
+ * routing policy knob, never a crash vector (same contract as every other
+ * env override in the tree).
+ */
+export function selfHostedModelMap(): Record<string, string> {
+  const raw = process.env[MODELS_ENV]
+  if (!raw) return {}
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return {}
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+  const out: Record<string, string> = {}
+  for (const [model, name] of Object.entries(parsed as Record<string, unknown>)) {
+    if (typeof name === 'string' && name.trim().length > 0) out[model] = name.trim()
+  }
+  return out
+}
+
+/**
+ * T19 — the model name the gateway should render this job with: the
+ * SELFHOSTED_MODELS mapping when set, else the Somnia model id itself, else
+ * the static SELFHOSTED_MODEL fallback. Model identity no longer dies at
+ * the adapter boundary — the live tier renders per-model profiles.
+ */
+export function selfHostedModelFor(model: string | null | undefined): string {
+  const mapped = model ? selfHostedModelMap()[model] : undefined
+  if (mapped) return mapped
+  if (model && model.trim().length > 0) return model.trim()
+  return selfHostedModel()
 }
 
 export function isSelfHostedConfigured(): boolean {
@@ -103,7 +148,7 @@ async function submitJobOnce(input: HostedRenderInput): Promise<{ id: string }> 
     headers: gatewayHeaders(),
     signal: AbortSignal.timeout(SUBMIT_TIMEOUT_MS),
     body: JSON.stringify({
-      model: selfHostedModel(),
+      model: selfHostedModelFor(input.model),
       prompt: input.prompt,
       resolution: input.resolution,
       duration_sec: input.durationSec,
@@ -148,7 +193,7 @@ async function submitImageJobOnce(input: HostedImageInput): Promise<{ id: string
     headers: gatewayHeaders(),
     signal: AbortSignal.timeout(SUBMIT_TIMEOUT_MS),
     body: JSON.stringify({
-      model: selfHostedModel(),
+      model: selfHostedModelFor(input.model),
       prompt: input.prompt,
       resolution: input.resolution,
       aspect_ratio: input.aspectRatio,

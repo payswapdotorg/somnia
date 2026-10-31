@@ -73,8 +73,8 @@ describe('pipeline — video jobs', () => {
     expect(done.status).toBe('completed')
     expect(done.progress).toBe(100)
 
-    // 5s default → 3 storyboard beats generated
-    expect(calls).toHaveLength(3)
+    // 5s default (pulse-3) → 4 storyboard beats generated (T19 premium profile)
+    expect(calls).toHaveLength(4)
 
     // the main video asset exists on disk and is non-empty
     const videoAsset = await db.asset.findFirst({
@@ -88,7 +88,7 @@ describe('pipeline — video jobs', () => {
     const generation = await db.generation.findFirst({ where: { jobId: job.id } })
     expect(generation?.status).toBe('succeeded')
     expect(generation?.videoPath).toBe(videoAsset!.path)
-    expect(JSON.parse(generation!.framesJson)).toHaveLength(3)
+    expect(JSON.parse(generation!.framesJson)).toHaveLength(4)
   })
 
   it('renders 10s jobs with five beats and honors the aspect ratio', async () => {
@@ -109,6 +109,43 @@ describe('pipeline — video jobs', () => {
       where: { jobId: job.id, kind: 'video', variantKey: 'main' },
     })
     expect(await fileExists(videoAsset!.path)).toBe(true)
+  })
+
+  it('T19: renders a lean two-beat storyboard for pulse-flash at 5s', async () => {
+    const user = await newUser()
+    const job = await createJob({
+      userId: user.id,
+      prompt: 'flash cut of a lantern festival',
+      model: 'pulse-flash',
+    })
+    const { source, calls } = fakeFrameSource()
+    const done = await processJob(job.id, { frameSource: source })
+
+    expect(done.status).toBe('completed')
+    // The flash profile: 5s → 2 beats (vs pulse-3's 4) — the model choice
+    // changes the render, not just the price.
+    expect(calls).toHaveLength(2)
+    const generation = await db.generation.findFirst({ where: { jobId: job.id } })
+    expect(JSON.parse(generation!.framesJson)).toHaveLength(2)
+    const videoAsset = await db.asset.findFirst({
+      where: { jobId: job.id, kind: 'video', variantKey: 'main' },
+    })
+    expect(await fileExists(videoAsset!.path)).toBe(true)
+  })
+
+  it('T19: pulse-flash at 10s renders the three-beat profile', async () => {
+    const user = await newUser()
+    const job = await createJob({
+      userId: user.id,
+      prompt: 'flash long cut of a desert convoy',
+      model: 'pulse-flash',
+      durationSec: 10,
+    })
+    const { source, calls } = fakeFrameSource()
+    const done = await processJob(job.id, { frameSource: source })
+
+    expect(done.status).toBe('completed')
+    expect(calls).toHaveLength(3)
   })
 
   it('uses the pinned keyframe timeline instead of generating imagery', async () => {
@@ -145,8 +182,9 @@ describe('pipeline — video jobs', () => {
 
     expect(done.status).toBe('completed')
     const generation = await db.generation.findFirst({ where: { jobId: job.id } })
-    // start + 3 beats + end = 5 segments in the rendered chain
-    expect(JSON.parse(generation!.framesJson)).toHaveLength(5)
+    // start + 4 beats (T19 pulse-3 premium profile) + end = 6 segments in the
+    // rendered chain
+    expect(JSON.parse(generation!.framesJson)).toHaveLength(6)
   })
 
   it('refunds the charge and marks the generation failed when frames fail', async () => {

@@ -17,6 +17,8 @@ import { createJob } from '@/lib/engine'
 import { processJob, type FrameSource } from '@/lib/pipeline'
 import { balance, topup } from '@/lib/ledger'
 import { resolveVideoProvider, selfHostedProvider, falProvider } from '@/lib/providers'
+import { selfHostedModelFor, selfHostedModelMap } from '@/lib/providers/selfhosted'
+import { falModelFor, falModelMap } from '@/lib/providers/fal'
 import { absoluteFromPublic } from '@/lib/frames'
 import { promises as fs } from 'node:fs'
 import sharp from 'sharp'
@@ -215,9 +217,11 @@ class FakeGateway {
 const ENV_KEYS = [
   'SELFHOSTED_URL',
   'SELFHOSTED_MODEL',
+  'SELFHOSTED_MODELS',
   'SELFHOSTED_API_KEY',
   'FAL_KEY',
   'FAL_MODEL',
+  'FAL_MODELS',
   'FAL_QUEUE_BASE',
   'PROVIDER_POLL_TIMEOUT_MS',
 ] as const
@@ -352,7 +356,9 @@ describe('providers — self-hosted gateway', () => {
 
       const body = gw.submits[0]?.body
       expect(body).toBeTruthy()
-      expect(body!.model).toBe('wan2.2-t2v-5b') // SELFHOSTED_MODEL default
+      // T19 — the job's Somnia model id reaches the gateway (no map set);
+      // model identity no longer dies at the adapter boundary.
+      expect(body!.model).toBe('pulse-3')
       expect(body!.prompt).toBe('a fox crossing a rooftop at dusk')
       expect(body!.duration_sec).toBe(10)
       expect(body!.aspect_ratio).toBe('9:16')
@@ -365,6 +371,97 @@ describe('providers — self-hosted gateway', () => {
     } finally {
       await gw.close()
     }
+  })
+
+  it('T19: forwards each job model distinctly — pulse-flash stays pulse-flash', async () => {
+    const gw = await new FakeGateway('selfhosted').start()
+    process.env.SELFHOSTED_URL = gw.url
+    try {
+      const user = await newUser()
+      const premium = await createJob({ userId: user.id, prompt: 'premium drift over a fjord' })
+      const flash = await createJob({
+        userId: user.id,
+        prompt: 'flash cut of a neon alley',
+        model: 'pulse-flash',
+      })
+      await processJob(premium.id)
+      await processJob(flash.id)
+
+      expect(gw.submits.map((s) => s.body.model)).toEqual(['pulse-3', 'pulse-flash'])
+    } finally {
+      await gw.close()
+    }
+  })
+
+  it('T19: maps Somnia models through SELFHOSTED_MODELS when set', async () => {
+    const gw = await new FakeGateway('selfhosted').start()
+    process.env.SELFHOSTED_URL = gw.url
+    process.env.SELFHOSTED_MODELS =
+      '{"pulse-3":"wan2.2-t2v-5b","pulse-flash":"ltx-2.5","prism":"sdxl-turbo"}'
+    try {
+      const user = await newUser()
+      const job = await createJob({
+        userId: user.id,
+        prompt: 'mapped model render',
+        model: 'pulse-flash',
+      })
+      await processJob(job.id)
+
+      expect(gw.submits[0]?.body.model).toBe('ltx-2.5')
+    } finally {
+      await gw.close()
+    }
+  })
+
+  it('T19: a malformed SELFHOSTED_MODELS map is ignored, never a crash vector', async () => {
+    const gw = await new FakeGateway('selfhosted').start()
+    process.env.SELFHOSTED_URL = gw.url
+    process.env.SELFHOSTED_MODELS = '{"pulse-3":' // truncated JSON
+    try {
+      const user = await newUser()
+      const job = await createJob({ userId: user.id, prompt: 'broken map render' })
+      await processJob(job.id)
+
+      expect(gw.submits[0]?.body.model).toBe('pulse-3') // raw Somnia id
+    } finally {
+      await gw.close()
+    }
+  })
+
+  it('T19: model resolution — raw ids, maps, and the static fallback', () => {
+    // No map, no static model: the Somnia id itself is the gateway model.
+    expect(selfHostedModelFor('pulse-3')).toBe('pulse-3')
+    expect(selfHostedModelFor('pulse-flash')).toBe('pulse-flash')
+    expect(selfHostedModelFor('prism')).toBe('prism')
+
+    // The map wins over the raw id.
+    process.env.SELFHOSTED_MODELS = '{"pulse-3":"wan2.2-t2v-5b","pulse-flash":"ltx-2.5"}'
+    expect(selfHostedModelMap()).toEqual({ 'pulse-3': 'wan2.2-t2v-5b', 'pulse-flash': 'ltx-2.5' })
+    expect(selfHostedModelFor('pulse-3')).toBe('wan2.2-t2v-5b')
+    expect(selfHostedModelFor('pulse-flash')).toBe('ltx-2.5')
+    // Unmapped model: raw id (model-aware gateways key off it).
+    expect(selfHostedModelFor('prism')).toBe('prism')
+
+    // Missing/foreign ids fall back to the static SELFHOSTED_MODEL.
+    process.env.SELFHOSTED_MODEL = 'e2b-kenburns-cpu'
+    expect(selfHostedModelFor(undefined)).toBe('e2b-kenburns-cpu')
+    expect(selfHostedModelFor('')).toBe('e2b-kenburns-cpu')
+    expect(selfHostedModelFor('e2b-kenburns-cpu')).toBe('e2b-kenburns-cpu')
+
+    // Malformed map: ignored entirely (policy knob, never a crash vector).
+    process.env.SELFHOSTED_MODELS = 'not json'
+    expect(selfHostedModelMap()).toEqual({})
+    expect(selfHostedModelFor('pulse-3')).toBe('pulse-3')
+
+    // fal: the map wins; an unmapped model NEVER sends a raw Somnia id into
+    // the queue URL path (it would 404) — the static FAL_MODEL answers.
+    process.env.FAL_MODELS = '{"pulse-flash":"fal-ai/ltx-video"}'
+    expect(falModelMap()).toEqual({ 'pulse-flash': 'fal-ai/ltx-video' })
+    expect(falModelFor('pulse-flash')).toBe('fal-ai/ltx-video')
+    expect(falModelFor('pulse-3')).toBe('fal-ai/wan-t2v') // FAL_MODEL default
+    process.env.FAL_MODEL = 'fal-ai/kling'
+    expect(falModelFor('pulse-3')).toBe('fal-ai/kling')
+    expect(falModelFor(undefined)).toBe('fal-ai/kling')
   })
 
   it('mirrors remote progress into the job row while polling', async () => {

@@ -51,6 +51,34 @@ const IMAGE_FETCH_TIMEOUT_MS = 30_000
 const IMAGE_MIN_BYTES = 800
 const SINGLE_RUN_CAP_MS = 120_000
 
+// T19 — model-keyed render profiles (mirror of src/lib/models.ts). The
+// premium model gets a deeper Ken Burns travel and a denser storyboard; the
+// flash model gets a tight travel, a lean storyboard and a coarser encode.
+// Unknown model ids (older rotators, foreign SELFHOSTED_MODEL names like
+// 'e2b-kenburns-cpu') keep the ORIGINAL constants — byte-compatible with
+// every prior rotation. Keep this table in sync with src/lib/models.ts.
+const MODEL_PROFILES = {
+  'pulse-3': {
+    label: 'pulse-3 (premium)',
+    maxZoom: 1.18,
+    beats: (durationSec) => (durationSec >= 10 ? 5 : 4),
+    crfDelta: 0,
+  },
+  'pulse-flash': {
+    label: 'pulse-flash (fast)',
+    maxZoom: 1.06,
+    beats: (durationSec) => (durationSec >= 10 ? 3 : 2),
+    crfDelta: 2,
+  },
+}
+const DEFAULT_PROFILE = {
+  label: 'default',
+  maxZoom: MAX_ZOOM,
+  beats: (durationSec) => (durationSec >= 10 ? 5 : 3),
+  crfDelta: 0,
+}
+const profileFor = (model) => (model && MODEL_PROFILES[model]) || DEFAULT_PROFILE
+
 // Mirror of src/lib/video.ts CANVAS (resolution → aspect → pixels).
 const CANVAS = {
   '540p': {
@@ -71,7 +99,8 @@ const CANVAS = {
 }
 const CRF = { '540p': 28, '720p': 26, '1080p': 23 }
 
-// Mirror of src/lib/pipeline.ts STORYBOARD_BEATS + beatCount.
+// Mirror of src/lib/pipeline.ts STORYBOARD_BEATS; storyboard density is
+// per-model (MODEL_PROFILES above) — mirror of src/lib/models.ts beatCountFor.
 const STORYBOARD_BEATS = [
   'wide establishing shot that sets the scene',
   'medium shot with the main subject in focus and implied motion',
@@ -79,7 +108,6 @@ const STORYBOARD_BEATS = [
   'insert detail beat that deepens the mood',
   'final payoff shot with cinematic closure',
 ]
-const beatCount = (durationSec) => (durationSec >= 10 ? 5 : 3)
 // T16 — the still beat mirrors the local prism path's 'still image' beat.
 const STILL_BEAT = 'a single striking still image with cinematic lighting and rich detail'
 
@@ -175,17 +203,17 @@ function runFfmpeg(args, timeoutMs) {
   })
 }
 
-function kenBurnsZoomExpression(segFrames, zoomIn) {
-  const rate = (MAX_ZOOM - 1) / Math.max(1, segFrames - 1)
+function kenBurnsZoomExpression(segFrames, zoomIn, maxZoom) {
+  const rate = (maxZoom - 1) / Math.max(1, segFrames - 1)
   return zoomIn
-    ? `min(1+${rate.toFixed(6)}*on,${MAX_ZOOM})`
-    : `max(${MAX_ZOOM}-${rate.toFixed(6)}*on,1.0)`
+    ? `min(1+${rate.toFixed(6)}*on,${maxZoom})`
+    : `max(${maxZoom}-${rate.toFixed(6)}*on,1.0)`
 }
 
-function segmentFilter(canvas, segFrames, zoomIn) {
+function segmentFilter(canvas, segFrames, zoomIn, maxZoom) {
   const workW = canvas.w * 2
   const workH = canvas.h * 2
-  const zoom = kenBurnsZoomExpression(segFrames, zoomIn)
+  const zoom = kenBurnsZoomExpression(segFrames, zoomIn, maxZoom)
   return [
     `scale=${workW}:${workH}:force_original_aspect_ratio=increase`,
     `crop=${workW}:${workH}`,
@@ -196,13 +224,13 @@ function segmentFilter(canvas, segFrames, zoomIn) {
 }
 
 /** Composite ordered stills → one MP4. Mirrors renderVideo() 1:1. */
-async function composite(job, dir, timeline) {
+async function composite(job, dir, timeline, profile) {
   const canvas = CANVAS[job.resolution]?.[job.aspectRatio]
   if (!canvas) throw new Error(`unsupported canvas ${job.resolution}/${job.aspectRatio}`)
   const count = timeline.length
   const segFrames = Math.max(2, Math.round(((job.durationSec + (count - 1) * XFADE_SEC) / count) * FPS))
   const segDur = segFrames / FPS
-  const crf = CRF[job.resolution]
+  const crf = CRF[job.resolution] + profile.crfDelta
 
   const segmentFiles = []
   for (let index = 0; index < count; index++) {
@@ -211,7 +239,7 @@ async function composite(job, dir, timeline) {
       [
         '-y', '-hide_banner', '-loglevel', 'error',
         '-loop', '1', '-i', timeline[index].file,
-        '-vf', segmentFilter(canvas, segFrames, index % 2 === 0),
+        '-vf', segmentFilter(canvas, segFrames, index % 2 === 0, profile.maxZoom),
         '-frames:v', String(segFrames),
         '-c:v', 'libx264', '-crf', String(crf), '-preset', 'veryfast', '-an',
         segFile,
@@ -272,6 +300,9 @@ async function renderJob(job) {
   job.status = 'running'
   job.progress = 10
 
+  // T19 — the render profile keyed by the job's Somnia model id.
+  const profile = profileFor(job.model)
+
   // ---- resolve the ordered timeline ----
   let timeline = []
   if (job.keyframes.length > 0) {
@@ -279,7 +310,7 @@ async function renderJob(job) {
     const buffers = await Promise.all(job.keyframes.map((ref) => downloadFrameRef(ref)))
     timeline = buffers.map((buf, i) => ({ buf, name: `src-${i + 1}.img` }))
   } else {
-    const count = beatCount(job.durationSec)
+    const count = profile.beats(job.durationSec)
     const prompt = job.prompt
     const beats = Array.from({ length: count }, (_, i) => STORYBOARD_BEATS[i % STORYBOARD_BEATS.length])
     const buffers = await Promise.all(
@@ -299,7 +330,7 @@ async function renderJob(job) {
   job.progress = 25
 
   // ---- composite ----
-  await composite(job, dir, timeline)
+  await composite(job, dir, timeline, profile)
 
   job.progress = 90
   job.videoUrl = `${PUBLIC_BASE}/files/${job.id}/out.mp4`
@@ -307,7 +338,7 @@ async function renderJob(job) {
   job.status = 'succeeded'
   job.progress = 100
   stats.succeeded += 1
-  log(`job ${job.id} succeeded — ${timeline.length} segments, ${job.resolution} ${job.aspectRatio}, ${job.durationSec}s`)
+  log(`job ${job.id} succeeded — ${timeline.length} segments, ${job.resolution} ${job.aspectRatio}, ${job.durationSec}s, ${profile.label}`)
 }
 
 /** Serialized render queue (2 vCPU box — one ffmpeg pipeline at a time). */
@@ -535,7 +566,7 @@ const server = http.createServer((req, res) => {
         jobs.set(job.id, job)
         stats.total += 1
         enqueueRender(job)
-        log(`job ${job.id} accepted — ${job.keyframes.length ? `pinned timeline (${job.keyframes.length} frames)` : `prompt-only (${beatCount(job.durationSec)} beats)`}`)
+        log(`job ${job.id} accepted — ${job.keyframes.length ? `pinned timeline (${job.keyframes.length} frames)` : `prompt-only (${profileFor(job.model).beats(job.durationSec)} beats, ${profileFor(job.model).label})`}`)
         res.writeHead(202, { 'content-type': 'application/json' })
         res.end(JSON.stringify({ id: job.id }))
         return

@@ -35,6 +35,7 @@ import { markJobCompleted, markJobFailed } from '@/lib/engine'
 import { providerCostUsd } from '@/lib/economics'
 import { framePath, writeBuffer } from '@/lib/frames'
 import { renderVideo } from '@/lib/video'
+import { beatCountFor } from '@/lib/models'
 import { failoverOrder, failoverImageOrder } from '@/lib/routing'
 import type { HostedRenderResult, HostedVideoProvider } from '@/lib/providers'
 import type { HostedImageResult } from '@/lib/providers/types'
@@ -55,10 +56,9 @@ const STORYBOARD_BEATS = [
   'final payoff shot with cinematic closure',
 ] as const
 
-/** Storyboard density: 5s clips get 3 beats, 10s clips get 5. */
-export function beatCount(durationSec: number): number {
-  return durationSec >= 10 ? 5 : 3
-}
+// T19 — storyboard density is per-model (src/lib/models.ts render profiles):
+// pulse-3 gets a denser storyboard than pulse-flash; unknown model ids keep
+// the original 3/5 split. The E2B gateway mirrors this table.
 
 type SdkSize = '1344x768' | '768x1344' | '1024x1024'
 
@@ -459,7 +459,7 @@ export async function processJob(jobId: string, opts: ProcessOptions = {}): Prom
         // timeline directly (no duplication, no generation).
         middle = pinned.map((k) => k.path)
       } else {
-        const count = beatCount(job.durationSec)
+        const count = beatCountFor(job.model, job.durationSec)
         middle = []
         for (let i = 1; i <= count; i++) {
           const buffer = await source.generate(
@@ -498,6 +498,7 @@ export async function processJob(jobId: string, opts: ProcessOptions = {}): Prom
         aspectRatio: job.aspectRatio as never,
         durationSec: job.durationSec || 5,
         segments,
+        model: job.model,
       })
 
       await markJobCompleted(job.id, video ? { videoPath: video } : undefined)
