@@ -34,7 +34,7 @@ import { db } from '@/lib/db'
 import { markJobCompleted, markJobFailed } from '@/lib/engine'
 import { providerCostUsd } from '@/lib/economics'
 import { framePath, writeBuffer } from '@/lib/frames'
-import { renderVideo } from '@/lib/video'
+import { loopTimeline, renderVideo } from '@/lib/video'
 import { beatCountFor } from '@/lib/models'
 import { failoverOrder, failoverImageOrder } from '@/lib/routing'
 import type { HostedRenderResult, HostedVideoProvider } from '@/lib/providers'
@@ -499,6 +499,7 @@ export async function processJob(jobId: string, opts: ProcessOptions = {}): Prom
         durationSec: job.durationSec || 5,
         segments,
         model: job.model,
+        loop: job.loop,
       })
 
       await markJobCompleted(job.id, video ? { videoPath: video } : undefined)
@@ -506,7 +507,9 @@ export async function processJob(jobId: string, opts: ProcessOptions = {}): Prom
         where: { id: generation.id },
         data: {
           status: 'succeeded',
-          framesJson: JSON.stringify(segments),
+          // T20 — the recorded frames ARE the render timeline: a seamless loop
+          // adds the mirrored closing beat (same helper renderVideo uses).
+          framesJson: JSON.stringify(job.loop ? loopTimeline(segments, true) : segments),
           videoPath: video,
         },
       })

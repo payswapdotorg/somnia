@@ -4,6 +4,7 @@
 // 2. Push gateway.mjs + gateway.env (fresh smg_ key) + supervisor.sh, boot it
 // 3. Self-test the FULL gateway contract directly against the sandbox:
 //      prompt-only video · pinned-timeline video · prism still
+//      pulse-3 dense storyboard · pulse-flash lean storyboard · seamless loop
 // 4. Atomically upsert the TierGateway DB singleton row:
 //      via POST /api/ops/gateway when TIER_OPS_KEY is set,
 //      otherwise via the same upsert straight against Neon (identical
@@ -243,7 +244,7 @@ done
     'https://picsum.photos/seed/somnia2/640/360',
   ]
 
-  log('self-test 1/5: prompt-only video (unknown model → default profile)')
+  log('self-test 1/6: prompt-only video (unknown model → default profile)')
   const vid1 = await submit('/v1/video/jobs', {
     model: GATEWAY_MODEL || 'e2b-kenburns-cpu',
     prompt: 'somnia rotation smoke — golden hour clouds drifting over a calm sea',
@@ -252,7 +253,7 @@ done
   const r1 = await pollJob(url, apiKey, `/v1/video/jobs/${vid1}`, 150_000)
   await check200(r1.video_url, apiKey, 'video_url')
 
-  log('self-test 2/5: pinned-timeline video')
+  log('self-test 2/6: pinned-timeline video')
   const vid2 = await submit('/v1/video/jobs', {
     model: GATEWAY_MODEL || 'e2b-kenburns-cpu',
     prompt: 'pinned timeline smoke',
@@ -262,7 +263,7 @@ done
   await check200(r2.video_url, apiKey, 'pinned video_url')
   if (!Array.isArray(r2.frames) || r2.frames.length === 0) throw new Error('pinned video returned no frames')
 
-  log('self-test 3/5: prism still')
+  log('self-test 3/6: prism still')
   const img1 = await submit('/v1/image/jobs', {
     model: GATEWAY_MODEL || 'e2b-kenburns-cpu',
     prompt: 'prism still smoke',
@@ -273,7 +274,7 @@ done
 
   // T19 — model-keyed rendering: the premium model gets a denser storyboard
   // than the flash model. 3s: pulse-3 → 4 beats, pulse-flash → 2 beats.
-  log('self-test 4/5: pulse-3 premium storyboard')
+  log('self-test 4/6: pulse-3 premium storyboard')
   const vid3 = await submit('/v1/video/jobs', {
     model: 'pulse-3',
     prompt: 'somnia premium smoke — four beats of drifting cirrus over basalt',
@@ -285,7 +286,7 @@ done
     throw new Error(`pulse-3 3s should render 4 beats, got ${r4.frames?.length}`)
   }
 
-  log('self-test 5/5: pulse-flash lean storyboard')
+  log('self-test 5/6: pulse-flash lean storyboard')
   const vid4 = await submit('/v1/video/jobs', {
     model: 'pulse-flash',
     prompt: 'somnia flash smoke — two quick beats',
@@ -295,6 +296,23 @@ done
   await check200(r5.video_url, apiKey, 'pulse-flash video_url')
   if (!Array.isArray(r5.frames) || r5.frames.length !== 2) {
     throw new Error(`pulse-flash 3s should render 2 beats, got ${r5.frames?.length}`)
+  }
+
+  // T20 — seamless loop: the mirrored closing beat grows the timeline by one
+  // and the render must still succeed (the reversed travel is in-video).
+  log('self-test 6/6: seamless loop (mirrored closing beat)')
+  const vid5 = await submit('/v1/video/jobs', {
+    model: 'pulse-flash',
+    prompt: 'somnia loop smoke — a breathing, returning drift',
+    resolution: '540p', duration_sec: 3, aspect_ratio: '16:9', hdr: false, loop: true, keyframes: [],
+  })
+  const r6 = await pollJob(url, apiKey, `/v1/video/jobs/${vid5}`, 150_000)
+  await check200(r6.video_url, apiKey, 'loop video_url')
+  if (!Array.isArray(r6.frames) || r6.frames.length !== 3) {
+    throw new Error(`loop 3s should render 2 beats + 1 mirror, got ${r6.frames?.length}`)
+  }
+  if (r6.frames[2] === r6.frames[0]) {
+    throw new Error('mirror beat should be a distinct frame reference')
   }
 
   log('full contract self-test PASSED')

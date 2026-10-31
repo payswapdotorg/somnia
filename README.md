@@ -23,14 +23,16 @@ research only, under original names (Pulse / Prism models, credit pools).
   cookies (`HttpOnly`, 30 days), per-user data isolation on every query, and an
   env-gated Google OAuth scaffold.
 - **The composer (`/`)** — video (Pulse 3 / Pulse Flash × 540p/720p/1080p ×
-  7 aspect ratios × 5s/10s, HDR 2x, free loops, up to 16 pinned keyframes) and
-  prism image mode; brainstorm variants; board filing; a live cost preview
-  computed with the same `src/lib/plans.ts` math the server charges by; job
-  polling through the render pipeline to the finished clip.
+  7 aspect ratios × 5s/10s, HDR 2x, free seamless loops, up to 16 pinned
+  keyframes) and prism image mode; brainstorm variants; board filing; a live
+  cost preview computed with the same `src/lib/plans.ts` math the server
+  charges by; job polling through the render pipeline to the finished clip.
 - **Render pipeline** — queued jobs are driven to real ffmpeg MP4s: pinned
   keyframe timelines or generated storyboard beats, Ken Burns compositing at
-  540p/720p/1080p across all seven aspect ratios, prism poster stills for
-  image jobs, refund-on-failure, idempotent re-processing.
+  540p/720p/1080p across all seven aspect ratios (T20: the Loop toggle
+  mirrors the opening beat with reversed travel so the clip closes on its
+  opening crop — a genuinely seamless seam, free of surcharge), prism poster
+  stills for image jobs, refund-on-failure, idempotent re-processing.
 - **History (`/history`)** — every dream with its recipe: extend (+5s),
   modify (instruction jobs with lineage), reframe (aspect variants),
   upscale (4K), unlisted share links, and one-click remix prefill back into

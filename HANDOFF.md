@@ -799,3 +799,34 @@ storyboard density, health surface, malformed-map safety), `tsc` clean,
 `eslint` clean, `next build` clean. Live E2E after deploy: one pulse-3 and
 one pulse-flash job on production — different keyframe counts, honest
 per-model charges (100cr vs 40cr at 720p/5s), both MP4s seekable.
+
+## T20 addendum — seamless loops (the Loop toggle made real)
+
+Until T20 the Loop checkbox was a stored-but-inert flag: it flowed UI →
+`clipCost` (free, no surcharge) → `Job.loop` → the wire → the gateway, and
+nothing rendered differently. T20 makes it true:
+
+- **`src/lib/video.ts`** — new `loopTimeline(segments, loop)` helper (the
+  single source): a loop appends the OPENING still as one extra closing beat.
+  `renderVideo` takes `loop?: boolean`; the mirrored beat renders with
+  reversed Ken Burns travel (zoom back out to 1.0) so its LAST frame lands on
+  the exact crop the clip opened with — playback wraps with an invisible
+  seam. Ken Burns motion only; camera/drift variant renders are untouched.
+- **`src/lib/pipeline.ts`** — the demo-tier composite passes `job.loop`, and
+  `framesJson` records the render timeline (mirror included) through the same
+  helper, so the recorded frames never drift from what was composited.
+- **`scripts/e2b/gateway.mjs`** — mirrors the same semantics: the loop job's
+  timeline gains `src-loop.img` (a copy of the opening beat, distinct file +
+  frame URL), the mirrored segment travels out, and the success log names the
+  seamless loop.
+- **`scripts/e2b/rotate.mjs`** — the rotation self-test grew from 5 to 6: a
+  `loop: true` job must render with 2 beats + 1 mirror at 3s and a distinct
+  mirror frame reference, so every ~45min rotation proves loops on the live
+  tier.
+- **Wire format unchanged** — `loop` was already on the submit body; older
+  gateways simply ignored it, so rotation ordering never matters.
+
+Verified: 400/400 specs green (3 new: seamless-seam pixel check — the
+decoded last frame must match the first frame of the mirrored clip; pinned
+timeline mirroring; `loopTimeline` unit contract), `tsc` clean, `eslint`
+clean, `next build` clean.

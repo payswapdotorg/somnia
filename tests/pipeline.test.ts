@@ -16,6 +16,12 @@ import { providerCostUsd } from '@/lib/economics'
 import { balance } from '@/lib/ledger'
 import { absoluteFromPublic } from '@/lib/frames'
 import { promises as fs } from 'node:fs'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
+import { loopTimeline } from '@/lib/video'
+import { resolveFfmpegBin } from '@/lib/runtime'
+
+const execFileAsync = promisify(execFile)
 
 const COLORS = ['#1e3a5f', '#5f1e3a', '#3a5f1e', '#5f3a1e', '#1e5f3a']
 
@@ -59,6 +65,37 @@ async function fileExists(publicPath: string): Promise<boolean> {
   } catch {
     return false
   }
+}
+
+/** Decode one frame of an MP4 as raw rgb24 — first frame, or the frame at
+ * the very tail (small negative -sseof seek; at 30fps 50ms is ≤2 frames
+ * from the end, still inside the mirrored closing beat's flat tail). */
+async function rawFrame(
+  videoPath: string,
+  which: 'first' | 'last'
+): Promise<Buffer> {
+  const args =
+    which === 'last'
+      ? ['-sseof', '-0.05', '-i', videoPath]
+      : ['-i', videoPath]
+  args.push('-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', 'pipe:1')
+  // encoding:'buffer' keeps the raw bytes intact (default utf8 would mangle them)
+  const { stdout } = await execFileAsync(resolveFfmpegBin(), args, {
+    maxBuffer: 64 * 1024 * 1024,
+    encoding: 'buffer',
+  })
+  return stdout as unknown as Buffer
+}
+
+/** Mean absolute per-channel difference between two equal-size rgb24 frames. */
+function meanAbsDiff(a: Buffer, b: Buffer): number {
+  if (a.length === 0 || a.length !== b.length) return Number.POSITIVE_INFINITY
+  let total = 0
+  const channels = Math.min(a.length, 16_000_000) // bounded sample: every 3rd byte
+  for (let i = 0; i < channels; i += 3) {
+    total += Math.abs(a[i] - b[i]) + Math.abs(a[i + 1] - b[i + 1]) + Math.abs(a[i + 2] - b[i + 2])
+  }
+  return total / (channels)
 }
 
 describe('pipeline — video jobs', () => {
@@ -146,6 +183,74 @@ describe('pipeline — video jobs', () => {
 
     expect(done.status).toBe('completed')
     expect(calls).toHaveLength(3)
+  })
+
+  it('T20: loop jobs mirror the opening beat and close on an invisible seam', async () => {
+    const user = await newUser()
+    const job = await createJob({
+      userId: user.id,
+      prompt: 'a breathing loop of drifting fog',
+      model: 'pulse-flash',
+      loop: true,
+    })
+    const { source, calls } = fakeFrameSource()
+    const done = await processJob(job.id, { frameSource: source })
+
+    expect(done.status).toBe('completed')
+    // the frame SOURCE generated only the flash profile's two beats…
+    expect(calls).toHaveLength(2)
+    // …but the render timeline grew by the mirrored closing beat
+    const generation = await db.generation.findFirst({ where: { jobId: job.id } })
+    const frames = JSON.parse(generation!.framesJson) as string[]
+    expect(frames).toHaveLength(3)
+    expect(frames[2]).toBe(frames[0])
+    const videoAsset = await db.asset.findFirst({
+      where: { jobId: job.id, kind: 'video', variantKey: 'main' },
+    })
+    expect(await fileExists(videoAsset!.path)).toBe(true)
+
+    // …and the decoded last frame matches the first frame: the loop seam is
+    // invisible (same still, same opening crop — codec noise only).
+    const abs = absoluteFromPublic(videoAsset!.path)
+    const first = await rawFrame(abs, 'first')
+    const last = await rawFrame(abs, 'last')
+    expect(first.length).toBeGreaterThan(0)
+    expect(last.length).toBe(first.length)
+    expect(meanAbsDiff(first, last)).toBeLessThan(6)
+  })
+
+  it('T20: loop mirrors a pinned keyframe timeline too', async () => {
+    const user = await newUser()
+    const job = await createJob({
+      userId: user.id,
+      prompt: 'pinned loop of a lantern orbit',
+      loop: true,
+      keyframes: [
+        { dataUrl: PNG_1PX, name: 'f1.png' },
+        { dataUrl: PNG_1PX, name: 'f2.png' },
+      ],
+    })
+    const { source, calls } = fakeFrameSource()
+    const done = await processJob(job.id, { frameSource: source })
+
+    expect(done.status).toBe('completed')
+    expect(calls).toHaveLength(0) // pinned timeline — nothing generated
+    const generation = await db.generation.findFirst({ where: { jobId: job.id } })
+    const frames = JSON.parse(generation!.framesJson) as string[]
+    expect(frames).toHaveLength(3)
+    expect(frames[2]).toBe(frames[0])
+    const videoAsset = await db.asset.findFirst({
+      where: { jobId: job.id, kind: 'video', variantKey: 'main' },
+    })
+    expect(await fileExists(videoAsset!.path)).toBe(true)
+  })
+
+  it('T20: loopTimeline — the single source of the mirrored closing beat', () => {
+    expect(loopTimeline(['a', 'b'], true)).toEqual(['a', 'b', 'a'])
+    expect(loopTimeline(['a', 'b'], false)).toEqual(['a', 'b'])
+    expect(loopTimeline(['a'], undefined)).toEqual(['a'])
+    expect(loopTimeline([], true)).toEqual([])
+    expect(loopTimeline(['a', 'b', ''], true)).toEqual(['a', 'b', 'a'])
   })
 
   it('uses the pinned keyframe timeline instead of generating imagery', async () => {

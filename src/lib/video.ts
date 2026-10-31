@@ -219,9 +219,27 @@ export interface RenderVideoOptions {
    * have their own ceilings and are unaffected.
    */
   model?: string
+  /**
+   * T20 — seamless loop: mirror the opening still as one extra closing beat
+   * with reversed Ken Burns travel, so the clip ends on the exact crop it
+   * started from and the playback seam is invisible. Ken Burns motion only
+   * (camera/drift variant renders are unaffected).
+   */
+  loop?: boolean
   /** Base file name (without extension) — defaults to the jobId. Phase 3
    * camera variants render to `<jobId>-camera-<preset>`. */
   outputName?: string
+}
+
+/**
+ * T20 — the render timeline for a storyboard: the ordered stills, plus a
+ * mirrored closing beat (the opening still again) when a seamless loop was
+ * requested. Both the composite and the recorded frames come from this one
+ * helper so the two never drift — the gateway mirrors it.
+ */
+export function loopTimeline(segments: string[], loop: boolean | undefined): string[] {
+  const stills = segments.filter((s) => typeof s === 'string' && s.length > 0)
+  return loop && stills.length > 0 ? [...stills, stills[0]] : stills
 }
 
 /**
@@ -236,6 +254,11 @@ export async function renderVideo(options: RenderVideoOptions): Promise<string |
   const outputName = options.outputName ?? jobId
   const segments = options.segments.filter((s) => typeof s === 'string' && s.length > 0)
   if (segments.length === 0) return null
+
+  // T20 — a seamless loop appends the opening still as a mirrored closing
+  // beat (Ken Burns only: camera/drift presets keep their own semantics).
+  const seamlessLoop = options.loop === true && motion === 'kenburns'
+  const timeline = seamlessLoop ? loopTimeline(segments, true) : segments
 
   // T19 — per-model render profile (zoom ceiling + encode coarseness).
   const profile = renderProfileFor(options.model)
@@ -252,7 +275,7 @@ export async function renderVideo(options: RenderVideoOptions): Promise<string |
     await ensureGeneratedDirWritable()
     tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'reelforge-render-'))
 
-    const count = segments.length
+    const count = timeline.length
     // Equal segment lengths so that: sum(L) - (N-1)*XFADE == durationSec.
     const segFrames = Math.max(
       2,
@@ -265,8 +288,11 @@ export async function renderVideo(options: RenderVideoOptions): Promise<string |
     const segmentFiles: string[] = []
     for (let index = 0; index < count; index++) {
       if (remaining() < 3_000) throw new Error('render budget exhausted before segments finished')
-      const source = await resolveMediaInput(segments[index])
+      const source = await resolveMediaInput(timeline[index])
       const segFile = path.join(tmpDir, `seg-${index}.mp4`)
+      // T20 — the mirrored closing beat travels OUT (zoom back to 1.0) so its
+      // last frame lands on the opening crop; alternation covers the rest.
+      const zoomIn = seamlessLoop && index === count - 1 ? false : index % 2 === 0
       const args = [
         '-y',
         '-hide_banner',
@@ -277,7 +303,7 @@ export async function renderVideo(options: RenderVideoOptions): Promise<string |
         '-i',
         source,
         '-vf',
-        segmentFilter(canvas, segFrames, motion, index % 2 === 0, kenBurnsMaxZoom),
+        segmentFilter(canvas, segFrames, motion, zoomIn, kenBurnsMaxZoom),
         '-frames:v',
         String(segFrames),
         '-c:v',

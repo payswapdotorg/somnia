@@ -235,11 +235,14 @@ async function composite(job, dir, timeline, profile) {
   const segmentFiles = []
   for (let index = 0; index < count; index++) {
     const segFile = path.join(dir, `seg-${index}.mp4`)
+    // T20 — the mirrored closing beat travels OUT (zoom back to 1.0) so its
+    // last frame lands on the opening crop; alternation covers the rest.
+    const zoomIn = job.loop && index === count - 1 ? false : index % 2 === 0
     const run = await runFfmpeg(
       [
         '-y', '-hide_banner', '-loglevel', 'error',
         '-loop', '1', '-i', timeline[index].file,
-        '-vf', segmentFilter(canvas, segFrames, index % 2 === 0, profile.maxZoom),
+        '-vf', segmentFilter(canvas, segFrames, zoomIn, profile.maxZoom),
         '-frames:v', String(segFrames),
         '-c:v', 'libx264', '-crf', String(crf), '-preset', 'veryfast', '-an',
         segFile,
@@ -322,6 +325,13 @@ async function renderJob(job) {
   }
   if (timeline.length === 0) throw new Error('empty timeline')
 
+  // T20 — a seamless loop mirrors the opening still as one extra closing
+  // beat (reversed travel lands the last frame back on the opening crop).
+  // Mirrors src/lib/video.ts loopTimeline — the recorded frames grow by one.
+  if (job.loop && timeline.length > 0) {
+    timeline.push({ buf: Buffer.from(timeline[0].buf), name: 'src-loop.img' })
+  }
+
   for (const [i, frame] of timeline.entries()) {
     await fsp.writeFile(path.join(dir, frame.name), frame.buf)
     frame.file = path.join(dir, frame.name)
@@ -338,7 +348,7 @@ async function renderJob(job) {
   job.status = 'succeeded'
   job.progress = 100
   stats.succeeded += 1
-  log(`job ${job.id} succeeded — ${timeline.length} segments, ${job.resolution} ${job.aspectRatio}, ${job.durationSec}s, ${profile.label}`)
+  log(`job ${job.id} succeeded — ${timeline.length} segments, ${job.resolution} ${job.aspectRatio}, ${job.durationSec}s, ${profile.label}${job.loop ? ', seamless loop' : ''}`)
 }
 
 /** Serialized render queue (2 vCPU box — one ffmpeg pipeline at a time). */
